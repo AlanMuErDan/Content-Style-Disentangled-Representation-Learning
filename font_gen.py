@@ -79,7 +79,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Generate character images from fonts.")
     parser.add_argument('--char_list', type=str, default='./char_list.txt', help='Path to character list')
     parser.add_argument('--fonts', type=str, default='./fonts', help='Font folder path')
-    parser.add_argument('--output', type=str, default='./data/style_imgs', help='Output image folder')
+    parser.add_argument('--output', type=str, default='./data', help='Output image folder')
     parser.add_argument('--img_size', type=int, nargs=2, default=[128, 128], help='Image size (width height)')
     parser.add_argument('--font_size', type=int, default=100, help='Font size')
     parser.add_argument('--mode', type=str, choices=['L', 'RGB'], default='L', help='Image mode')
