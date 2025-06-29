@@ -1,0 +1,13 @@
+encoder: resnet18
+decoder: unet
+latent_dim: 256
+vq_content: true
+vq_style: true
+vq_content_codebook_size: 512
+vq_style_codebook_size: 256
+lr: 0.0001
+img_size: 128
+data_dir: ./data
+batch_size: 32
+epochs: 100
+# resume_ckpt: "checkpoints/ckpt_epoch_10.pth"  # 或者为空 ""

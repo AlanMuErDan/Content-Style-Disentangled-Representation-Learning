@@ -72,7 +72,7 @@ def generate_images(char_list_file, font_folder, output_folder,
         for char in supported_chars:
             img = render_char_image(char, font_path, img_size, font_size, mode)
             if img:
-                filename = f"{font_name}_{safe_filename(char)}.png"
+                filename = f"{font_name}+{safe_filename(char)}.png"
                 img.save(os.path.join(font_output_dir, filename))
 
 if __name__ == '__main__':
