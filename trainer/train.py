@@ -1,3 +1,5 @@
+# trainer/train.py
+
 import os
 import torch
 from torch.utils.data import DataLoader
@@ -5,6 +7,8 @@ from tqdm import tqdm
 from utils.losses import reconstruction_loss
 from utils.logger import init_wandb, log_images, log_loss, log_epoch
 from models import build_encoder, build_decoder, build_quantizer, build_mlp
+import random 
+import torch.nn.functional as F
 
 # read configuration file
 import yaml
@@ -14,22 +18,15 @@ if not os.path.exists(config_path):
 with open(config_path, 'r') as f:
     config = yaml.safe_load(f)
 
-# if resume checkpoint is specified, load it
-resume_ckpt_path = config.get("resume_ckpt", "")
 start_epoch = 0
 
-if resume_ckpt_path and os.path.isfile(resume_ckpt_path):
-    print(f"Resuming from checkpoint: {resume_ckpt_path}")
-    ckpt = torch.load(resume_ckpt_path, map_location=device)
-    encoder.load_state_dict(ckpt["encoder"])
-    decoder.load_state_dict(ckpt["decoder"])
-    mlp_s.load_state_dict(ckpt["mlp_s"])
-    mlp_c.load_state_dict(ckpt["mlp_c"])
-    if "vq_content" in ckpt and vq_dict.get("content"):
-        vq_dict["content"].load_state_dict(ckpt["vq_content"])
-    if "vq_style" in ckpt and vq_dict.get("style"):
-        vq_dict["style"].load_state_dict(ckpt["vq_style"])
-    start_epoch = ckpt.get("epoch", 0) + 1
+
+def sample_ddpm_images(decoder, latents, device):
+    decoder.eval()
+    with torch.no_grad():
+        samples = decoder.sample(latents, steps=100)
+    return samples
+
 
 def train_loop(config, dataset):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -46,6 +43,22 @@ def train_loop(config, dataset):
     if vq_dict.get("style"):
         vq_dict["style"] = vq_dict["style"].to(device)
 
+    # resume checkpoint
+    resume_ckpt_path = config.get("resume_ckpt", "")
+    if resume_ckpt_path and os.path.isfile(resume_ckpt_path):
+        print(f"Resuming from checkpoint: {resume_ckpt_path}")
+        ckpt = torch.load(resume_ckpt_path, map_location=device)
+        encoder.load_state_dict(ckpt["encoder"])
+        decoder.load_state_dict(ckpt["decoder"])
+        mlp_s.load_state_dict(ckpt["mlp_s"])
+        mlp_c.load_state_dict(ckpt["mlp_c"])
+        if "vq_content" in ckpt and vq_dict.get("content"):
+            vq_dict["content"].load_state_dict(ckpt["vq_content"])
+        if "vq_style" in ckpt and vq_dict.get("style"):
+            vq_dict["style"].load_state_dict(ckpt["vq_style"])
+        global start_epoch
+        start_epoch = ckpt.get("epoch", 0) + 1
+
     # optimizer
     modules = [encoder, decoder, mlp_s, mlp_c]
     if vq_dict.get("content"):
@@ -60,6 +73,8 @@ def train_loop(config, dataset):
     # dataloader
     dataloader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=True, num_workers=4)
     init_wandb(config)
+
+    use_ddpm = config['decoder'] == 'ddpm'
 
     for epoch in range(start_epoch, config['epochs']):
         encoder.train(); decoder.train(); mlp_s.train(); mlp_c.train()
@@ -83,19 +98,32 @@ def train_loop(config, dataset):
                 zsA, _ = vq_dict["style"](zsA)
                 zsB, _ = vq_dict["style"](zsB)
 
-            # Decode
-            recA = decoder(torch.cat([zsA, zcA], dim=1))
-            recB = decoder(torch.cat([zsB, zcB], dim=1))
-            crossAB = decoder(torch.cat([zcA, zsB], dim=1))
-            crossBA = decoder(torch.cat([zcB, zsA], dim=1))
+            if use_ddpm:
+                # pick one of four tasks at each step (random or round robin)
+                choice = random.choice(["recA", "recB", "crossAB", "crossBA"])
 
-            # Loss
-            loss = (
-                reconstruction_loss(recA, imgA) +
-                reconstruction_loss(recB, imgB) +
-                reconstruction_loss(crossAB, gt_crossAB) +
-                reconstruction_loss(crossBA, gt_crossBA)
-            ) / 4
+                if choice == "recA":
+                    noise_pred, noise = decoder(imgA, torch.cat([zsA, zcA], dim=1))
+                elif choice == "recB":
+                    noise_pred, noise = decoder(imgB, torch.cat([zsB, zcB], dim=1))
+                elif choice == "crossAB":
+                    noise_pred, noise = decoder(gt_crossAB, torch.cat([zsB, zcA], dim=1))
+                else:
+                    noise_pred, noise = decoder(gt_crossBA, torch.cat([zsA, zcB], dim=1))
+
+                loss = F.mse_loss(noise_pred, noise)
+            else:
+                recA = decoder(torch.cat([zsA, zcA], dim=1))
+                recB = decoder(torch.cat([zsB, zcB], dim=1))
+                crossAB = decoder(torch.cat([zcA, zsB], dim=1))
+                crossBA = decoder(torch.cat([zcB, zsA], dim=1))
+
+                loss = (
+                    reconstruction_loss(recA, imgA) +
+                    reconstruction_loss(recB, imgB) +
+                    reconstruction_loss(crossAB, gt_crossAB) +
+                    reconstruction_loss(crossBA, gt_crossBA)
+                ) / 4
 
             optim.zero_grad()
             loss.backward()
@@ -103,7 +131,15 @@ def train_loop(config, dataset):
             losses.append(loss.item())
 
             if i % 100 == 0:
-                log_images(imgA, recA, crossBA, gt_crossBA, imgB, recB, crossAB, gt_crossAB)
+                if use_ddpm:
+                    with torch.no_grad():
+                        sampleA = sample_ddpm_images(decoder, torch.cat([zsA, zcA], dim=1), device)
+                        sampleB = sample_ddpm_images(decoder, torch.cat([zsB, zcB], dim=1), device)
+                        sampleAB = sample_ddpm_images(decoder, torch.cat([zsB, zcA], dim=1), device)
+                        sampleBA = sample_ddpm_images(decoder, torch.cat([zsA, zcB], dim=1), device)
+                    log_images(imgA, sampleA, sampleBA, gt_crossBA, imgB, sampleB, sampleAB, gt_crossAB)
+                else:
+                    log_images(imgA, recA, crossBA, gt_crossBA, imgB, recB, crossAB, gt_crossAB)
                 log_loss(step=epoch * 1000 + i, loss=loss.item())
 
         avg_loss = sum(losses) / len(losses)

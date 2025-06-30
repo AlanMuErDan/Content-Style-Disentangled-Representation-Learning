@@ -22,11 +22,17 @@ def build_quantizer(config):
             codebook_size=config.get("vq_content_codebook_size", 512),
             code_dim=config.get("latent_dim", 256)
         )
+        print("Using VQ for content quantization with codebook size:", 
+              config.get("vq_content_codebook_size", 512))
 
     if config.get("vq_style", False):
         quantizers["style"] = VQ(
             codebook_size=config.get("vq_style_codebook_size", 512),
             code_dim=config.get("latent_dim", 256)
         )
+        print("Using VQ for style quantization with codebook size:", 
+              config.get("vq_style_codebook_size", 256))
+    
+
 
     return quantizers  
