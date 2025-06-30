@@ -53,6 +53,8 @@ def build_decoder(name="simple", latent_dim=512, img_size=128):
     elif name == "ddpm":
         from .ddpm_decoder import DDPMDecoder
         return DDPMDecoder(latent_dim=latent_dim, img_size=img_size)
+    elif name == "ddpm_enhanced":
+        return DDPMDecoder(latent_dim=latent_dim, img_size=img_size, enhanced=True)
     else:
         raise NotImplementedError(f"Decoder '{name}' is not supported.")
     

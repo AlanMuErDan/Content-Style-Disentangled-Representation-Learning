@@ -1,4 +1,4 @@
-# trainer/train.py
+# trainer/train_disentangle.py
 
 import os
 import torch
