@@ -50,5 +50,9 @@ def build_decoder(name="simple", latent_dim=512, img_size=128):
         return SimpleDecoder(latent_dim=latent_dim, img_size=img_size)
     elif name == "unet":
         return UNetDecoder(latent_dim=latent_dim, img_size=img_size)
+    elif name == "ddpm":
+        from .ddpm_decoder import DDPMDecoder
+        return DDPMDecoder(latent_dim=latent_dim, img_size=img_size)
     else:
         raise NotImplementedError(f"Decoder '{name}' is not supported.")
+    

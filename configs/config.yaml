@@ -1,8 +1,8 @@
 encoder: resnet18
-decoder: unet
+decoder: ddpm
 latent_dim: 256
-vq_content: true
-vq_style: true
+vq_content: false
+vq_style: false
 vq_content_codebook_size: 512
 vq_style_codebook_size: 256
 lr: 0.0001
