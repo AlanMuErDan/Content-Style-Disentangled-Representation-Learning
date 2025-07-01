@@ -4,15 +4,11 @@ import torch
 import torch.nn as nn
 from torchvision.models import resnet18, resnet34
 
-# -----------------------
-# ResNet-based encoders
-# -----------------------
-
 class ResNet18Encoder(nn.Module):
     def __init__(self, output_dim=256):
         super().__init__()
         base = resnet18(weights=None)
-        base.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        base.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False) # change input channels to 1 
         self.features = nn.Sequential(*list(base.children())[:-2])
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
         self.out = nn.Linear(512, output_dim)
@@ -21,12 +17,14 @@ class ResNet18Encoder(nn.Module):
         x = self.features(x)
         x = self.pool(x).squeeze()
         return self.out(x)
+
+
 
 class ResNet34Encoder(nn.Module):
     def __init__(self, output_dim=256):
         super().__init__()
         base = resnet34(weights=None)
-        base.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        base.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False) # change input channels to 1
         self.features = nn.Sequential(*list(base.children())[:-2])
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
         self.out = nn.Linear(512, output_dim)
@@ -36,9 +34,7 @@ class ResNet34Encoder(nn.Module):
         x = self.pool(x).squeeze()
         return self.out(x)
 
-# -----------------------
-# UNet-style encoder (without skip output)
-# -----------------------
+
 
 class UNetEncoder(nn.Module):
     def __init__(self, output_dim=256):
@@ -58,9 +54,7 @@ class UNetEncoder(nn.Module):
         x = self.pool(x).squeeze()   # [B, 512]
         return self.fc(x)
 
-# -----------------------
-# build_encoder selector
-# -----------------------
+
 
 def build_encoder(name="resnet18", output_dim=256):
     if name == "resnet18":

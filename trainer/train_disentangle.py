@@ -9,9 +9,8 @@ from utils.logger import init_wandb, log_images, log_loss, log_epoch
 from models import build_encoder, build_decoder, build_quantizer, build_mlp
 import random 
 import torch.nn.functional as F
-
-# read configuration file
 import yaml
+
 config_path = "configs/config.yaml"
 if not os.path.exists(config_path):
     raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -21,11 +20,13 @@ with open(config_path, 'r') as f:
 start_epoch = 0
 
 
+
 def sample_ddpm_images(decoder, latents, device):
     decoder.eval()
     with torch.no_grad():
         samples = decoder.sample(latents, steps=100)
     return samples
+
 
 
 def train_loop(config, dataset):
@@ -37,13 +38,13 @@ def train_loop(config, dataset):
     print(f"Using {config['encoder']} encoder and {config['decoder']} decoder.")
     mlp_s = build_mlp(config['latent_dim'], config['latent_dim']).to(device)
     mlp_c = build_mlp(config['latent_dim'], config['latent_dim']).to(device)
-    vq_dict = build_quantizer(config)  # {'content': VQ or None, 'style': VQ or None}
+    vq_dict = build_quantizer(config) 
     if vq_dict.get("content"):
         vq_dict["content"] = vq_dict["content"].to(device)
     if vq_dict.get("style"):
         vq_dict["style"] = vq_dict["style"].to(device)
 
-    # resume checkpoint
+    # resume checkpoint if needed 
     resume_ckpt_path = config.get("resume_ckpt", "")
     if resume_ckpt_path and os.path.isfile(resume_ckpt_path):
         print(f"Resuming from checkpoint: {resume_ckpt_path}")
@@ -91,12 +92,16 @@ def train_loop(config, dataset):
             zsB, zcB = mlp_s(zB), mlp_c(zB)
 
             # VQ
+            vq_loss = 0.0
             if vq_dict.get("content"):
-                zcA, _ = vq_dict["content"](zcA)
-                zcB, _ = vq_dict["content"](zcB)
+                zcA, loss_contentA = vq_dict["content"](zcA)
+                zcB, loss_contentB = vq_dict["content"](zcB)
+                vq_loss += (loss_contentA + loss_contentB) / 2
+
             if vq_dict.get("style"):
-                zsA, _ = vq_dict["style"](zsA)
-                zsB, _ = vq_dict["style"](zsB)
+                zsA, loss_styleA = vq_dict["style"](zsA)
+                zsB, loss_styleB = vq_dict["style"](zsB)
+                vq_loss += (loss_styleA + loss_styleB) / 2
 
             if use_ddpm:
                 # pick one of four tasks at each step (random or round robin)
@@ -112,6 +117,7 @@ def train_loop(config, dataset):
                     noise_pred, noise = decoder(gt_crossBA, torch.cat([zsA, zcB], dim=1))
 
                 loss = F.mse_loss(noise_pred, noise)
+                loss += config.get("vq_loss_weight", 1.0) * vq_loss
             else:
                 recA = decoder(torch.cat([zsA, zcA], dim=1))
                 recB = decoder(torch.cat([zsB, zcB], dim=1))
@@ -124,6 +130,7 @@ def train_loop(config, dataset):
                     reconstruction_loss(crossAB, gt_crossAB) +
                     reconstruction_loss(crossBA, gt_crossBA)
                 ) / 4
+                loss += config.get("vq_loss_weight", 1.0) * vq_loss
 
             optim.zero_grad()
             loss.backward()
