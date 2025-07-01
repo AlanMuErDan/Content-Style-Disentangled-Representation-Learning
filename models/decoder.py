@@ -19,6 +19,7 @@ class SimpleDecoder(nn.Module):
         return self.upsample(x)
 
 
+
 class UNetDecoder(nn.Module):
     def __init__(self, latent_dim=512, img_size=128):
         super().__init__()
@@ -43,6 +44,7 @@ class UNetDecoder(nn.Module):
         x = self.up3(x)
         x = self.up4(x)
         return x
+
 
 
 def build_decoder(name="simple", latent_dim=512, img_size=128):
