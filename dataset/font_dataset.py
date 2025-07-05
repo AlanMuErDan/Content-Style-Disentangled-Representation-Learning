@@ -10,7 +10,7 @@ from torchvision import transforms
 class FontPairDataset(Dataset):
     def __init__(self, root_dir, img_size=128):
         self.root_dir = root_dir
-        self.styles = os.listdir(root_dir) # a list of styles 
+        self.styles = os.listdir(root_dir)  # a list of styles 
         self.data = {}  # style -> {char: path}
 
         for style in self.styles:
@@ -47,3 +47,29 @@ class FontPairDataset(Dataset):
         img_gt_crossBA = self.transform(Image.open(self.data[styleA][charB]).convert("L"))
 
         return imgA, imgB, img_gt_crossAB, img_gt_crossBA
+
+
+class SingleFontDataset(Dataset):
+    def __init__(self, root_dir, img_size=128):
+        self.img_paths = []
+        for root, dirs, files in os.walk(root_dir):
+            for file in files:
+                if file.endswith(".png"):
+                    self.img_paths.append(os.path.join(root, file))
+
+        self.transform = transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
+
+        if len(self.img_paths) == 0:
+            raise RuntimeError(f"No PNG files found in {root_dir}")
+
+    def __len__(self):
+        return len(self.img_paths)
+
+    def __getitem__(self, idx):
+        img = Image.open(self.img_paths[idx]).convert("L")
+        img = self.transform(img)
+        return img

@@ -1,16 +1,29 @@
-encoder: resnet18 # resnet18, resnet34, unet
-decoder: unet # simple, unet, ddpm, ddpm_enhanced 
-latent_dim: 256
-vq_content: true
-vq_style: true
-vq_content_codebook_size: 512
-vq_style_codebook_size: 256
-lr: 0.0001
 img_size: 128
 data_dir: ./data
+
+encoder_c: resnet18 # resnet18, resnet34, unet
+encoder_s: resnet18 # resnet18, resnet34, unet
+decoder: unet # simple, unet, ddpm, ddpm_enhanced 
+
+latent_dim: 256
+
+vq_content: false
+vq_style: false
+vq_content_codebook_size: 512
+vq_style_codebook_size: 256
+
+lr: 0.0001
 batch_size: 32
-epochs: 100
-# resume_ckpt: "checkpoints/ckpt_epoch_10.pth"  # 或者为空 ""
+epochs: 200
 train_stage: 1   # 1 or 2
+
+use_gan: false 
+
 vq_loss_weight: 0.25
+kl_weight: 0.1
+gan_weight: 0.1
+lpips_weight: 0.8
+
+
+# resume_ckpt: "checkpoints/ckpt_epoch_10.pth"  # 或者为空 ""
 # freeze_ckpt: "checkpoints/resnet34/ckpt_epoch_99.pth"
