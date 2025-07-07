@@ -1,17 +1,12 @@
 import math
 from typing import Optional
-
 import torch
 import torch.nn as nn
 from diffusers.models.vae import Decoder as DiffusersDecoder
 
-# -----------------------------------------------------------------------------
-#  Baseline decoders (vector latents)
-# -----------------------------------------------------------------------------
+
 
 class SimpleDecoder(nn.Module):
-    """Fully‑connected + ConvTranspose2d pipeline for *vector* latents (B, latent_dim)."""
-
     def __init__(self, latent_dim: int = 512, img_size: int = 128):
         super().__init__()
         self.fc = nn.Linear(latent_dim, 512 * 4 * 4)
@@ -28,9 +23,8 @@ class SimpleDecoder(nn.Module):
         return self.upsample(x)
 
 
-class UNetDecoder(nn.Module):
-    """Transpose‑conv UNet‑style decoder for *vector* latents."""
 
+class UNetDecoder(nn.Module):
     def __init__(self, latent_dim: int = 512, img_size: int = 128):
         super().__init__()
         self.fc = nn.Linear(latent_dim, 64 * 8 * 8)
@@ -48,30 +42,18 @@ class UNetDecoder(nn.Module):
         return x
 
 
-# -----------------------------------------------------------------------------
-#  Diffusers‑style decoder (spatial latents)
-# -----------------------------------------------------------------------------
 
 class FeatureMapDecoder(DiffusersDecoder):
-    """Stable‑Diffusion VAE decoder that upsamples *spatial* latents.
-
-    Input latent shape: **[B, C_latent, 8, 8]** (typ. C_latent = 8).
-    Output resolution: ``img_size`` (default 128).
-    """
-
     def __init__(self,
                  latent_channels: int = 8,
                  img_size: int = 128,
                  out_channels: int = 1,
                  layers_per_block: int = 2):
-        # How many ×2 up‑sampling stages do we need? 8 × 2^n = img_size
         n_up = int(math.log2(img_size // 8))
         if 8 * 2 ** n_up != img_size:
-            raise ValueError("img_size must be a power‑of‑two multiple of 8 (e.g. 32, 64, 128)")
+            raise ValueError("img_size must be a power-of-two multiple of 8 (e.g. 32, 64, 128)")
 
         up_block_types = ("UpDecoderBlock2D",) * n_up
-        # diffusers Decoder reverses this list internally, so provide low→high (length n_up+1)
-                # Make all blocks keep the same channel count so conv_norm_out matches.
         block_out_channels = (64,) * (n_up + 1)
 
         super().__init__(
@@ -86,26 +68,15 @@ class FeatureMapDecoder(DiffusersDecoder):
     
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         x = super().forward(z)  # [B, 1, 128, 128], unbounded output
-        return torch.tanh(x)    # force into [-1, 1]
+        return torch.tanh(x)    
 
 
-# -----------------------------------------------------------------------------
-#  Factory
-# -----------------------------------------------------------------------------
 
 def build_decoder(name: str = "diff_decoder",
                   latent_dim: Optional[int] = 512,
                   img_size: int = 128):
-    """Instantiate a decoder by name.
-
-    ``name`` can be one of:
-    * ``simple`` / ``unet``   – expect *vector* latents (B, latent_dim)
-    * ``diff_decoder`` / ``featuremap`` / ``vae_decoder``   – expect spatial latents (B,8,8,8)
-    * ``ddpm`` / ``ddpm_enhanced``   – project‑specific DDPM decoders
-    """
     name = name.lower()
 
-    # ---------------------- vector latent decoders ---------------------------
     if name == "simple":
         if latent_dim is None:
             raise ValueError("'simple' decoder expects vector latents; latent_dim cannot be None.")
@@ -116,13 +87,7 @@ def build_decoder(name: str = "diff_decoder",
             raise ValueError("'unet' decoder expects vector latents; latent_dim cannot be None.")
         return UNetDecoder(latent_dim=latent_dim, img_size=img_size)
 
-    # ---------------------- spatial latent decoder (diffusers) --------------
-    if name in {"diff_decoder", "featuremap", "vae_decoder"}:  # aliases
+    if name in {"diff_decoder", "featuremap", "vae_decoder"}:  
         return FeatureMapDecoder(latent_channels=8, img_size=img_size)
-
-    # ---------------------- project‑specific DDPM decoders -------------------
-    if name in {"ddpm", "ddpm_enhanced"}:
-        from .ddpm_decoder import DDPMDecoder
-        return DDPMDecoder(latent_dim=latent_dim, img_size=img_size, enhanced=(name == "ddpm_enhanced"))
 
     raise NotImplementedError(f"Decoder '{name}' is not supported.")
