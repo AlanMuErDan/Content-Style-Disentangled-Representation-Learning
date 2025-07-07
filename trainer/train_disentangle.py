@@ -22,7 +22,7 @@ with open(config_path, 'r') as f:
 start_epoch = 0
 lpips_model = lpips.LPIPS(net='vgg').cuda()
 
-def train_loop(config, dataset):
+def train_disentangle_loop(config, dataset):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.autograd.set_detect_anomaly(True)
 
@@ -170,7 +170,6 @@ def train_loop(config, dataset):
         print(f"[Epoch {epoch}] Avg Loss: {avg_loss:.4f}")
         log_epoch(epoch, avg_loss)
 
-        os.makedirs("checkpoints", exist_ok=True)
         ckpt = {
             "encoder_c": encoder_c.state_dict(),
             "encoder_s": encoder_s.state_dict(),
@@ -182,4 +181,6 @@ def train_loop(config, dataset):
         if vq_dict.get("style"):
             ckpt["vq_style"] = vq_dict["style"].state_dict()
 
-        torch.save(ckpt, f"checkpoints/ckpt_epoch_{epoch}.pth")
+        # Save checkpoint
+        if (epoch + 1) % config.get("checkpoint_interval", 1) == 0:
+            torch.save(ckpt, f"checkpoints/ckpt_epoch_{epoch}.pth")

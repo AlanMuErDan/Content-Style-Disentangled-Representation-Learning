@@ -2,21 +2,23 @@
 
 import yaml
 from dataset.font_dataset import FontPairDataset
-from trainer.train_disentangle import train_loop
-from trainer.train_DDPM import train_stage2_ddpm
+from trainer.train_disentangle import train_disentangle_loop
+from trainer.train_vae import train_vae_loop
 
 def main():
     config = yaml.safe_load(open("configs/config.yaml"))
-    dataset = FontPairDataset(root_dir=config['data_dir'], img_size=config['img_size'])
 
-    if config.get("train_stage", 1) == 1:
-        print("Training Stage 1: Joint training of encoder + decoder.")
-        train_loop(config, dataset)
-    elif config.get("train_stage") == 2:
-        print("Training Stage 2: Freeze encoder, train DDPM decoder.")
-        ckpt_path = config.get("freeze_ckpt", "")
-        assert ckpt_path != "", "Missing `freeze_ckpt` path in config for Stage 2 training."
-        train_stage2_ddpm(config, dataset, freeze_ckpt_path=ckpt_path)
+    if config.get("train_stage") == "Disentangle":
+        print("Disentangle VAE Training....")
+        print(f"Training config: {config['disentangle']}")
+        dataset = FontPairDataset(root_dir=config['data_dir'], img_size=config['img_size'])
+        train_disentangle_loop(config["disentangle"], dataset)
+
+    elif config.get("train_stage") == "VAE": 
+        print("Disentangle VAE Training...")
+        print(f"Training config: {config['vae']}")
+        train_vae_loop(config["vae"])
+
     else:
         raise ValueError("`train_stage` must be either 1 or 2")
 
