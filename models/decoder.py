@@ -74,6 +74,7 @@ class FeatureMapDecoder(DiffusersDecoder):
 
 def build_decoder(name: str = "diff_decoder",
                   latent_dim: Optional[int] = 512,
+                  latent_channels: Optional[int] = 8,
                   img_size: int = 128):
     name = name.lower()
 
@@ -88,6 +89,6 @@ def build_decoder(name: str = "diff_decoder",
         return UNetDecoder(latent_dim=latent_dim, img_size=img_size)
 
     if name in {"diff_decoder", "featuremap", "vae_decoder"}:  
-        return FeatureMapDecoder(latent_channels=8, img_size=img_size)
+        return FeatureMapDecoder(latent_channels=latent_channels, img_size=img_size)
 
     raise NotImplementedError(f"Decoder '{name}' is not supported.")

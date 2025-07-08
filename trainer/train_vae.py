@@ -65,7 +65,15 @@ def train_vae_loop(config):
                     fake_detach = decoder(z).detach()
                 real_pred = discriminator(img)
                 fake_pred = discriminator(fake_detach)
-                d_loss = torch.relu(1.0 - real_pred).mean() + torch.relu(1.0 + fake_pred).mean()
+                d_loss_gan = torch.relu(1.0 - real_pred).mean() + torch.relu(1.0 + fake_pred).mean()
+
+                # LeCam 正则项
+                lecam_reg = ((real_pred - fake_pred) ** 2).mean()
+                lambda_lecam = config.get("lecam_weight", 0.1)
+
+                # 合并
+                d_loss = d_loss_gan + lambda_lecam * lecam_reg
+                
                 disc_optim.zero_grad()
                 d_loss.backward()
                 disc_optim.step()

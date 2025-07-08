@@ -16,7 +16,7 @@ in_channels: 1
 vae:
   encoder: vae_encoder          
   decoder: vae_decoder          
-  use_gan: false
+  use_gan: true
   latent_dim: 256              
   lpips_weight: 0.8
   kl_weight: 0.2
@@ -35,11 +35,11 @@ vae:
 # DISENTANGLE CONFIGURATION
 # ==============================
 disentangle:
-  encoder_c: resnet18
-  encoder_s: resnet18
-  decoder: unet
+  encoder_c: vae_encoder
+  encoder_s: vae_encoder 
+  decoder: vae_decoder
   latent_dim: 256
-  use_gan: false
+  use_gan: true
   lpips_weight: 0.8
   kl_weight: 0.2
   vq_loss_weight: 1.0
@@ -49,6 +49,13 @@ disentangle:
   vq_style: false
   vq_content_codebook_size: 512
   vq_style_codebook_size: 256
+  img_size: 128
+  data_root: ./data
+  batch_size: 32
+  epochs: 5000
+  lr: 0.0001
+  checkpoint_interval: 500
+  in_channels: 1
 
 # ==============================
 # DDPM CONFIGURATION

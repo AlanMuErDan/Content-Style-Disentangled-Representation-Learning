@@ -17,7 +17,7 @@ def main():
     elif config.get("train_stage") == "VAE": 
         print("Disentangle VAE Training...")
         print(f"Training config: {config['vae']}")
-        train_vae_loop(config["vae"])
+        train_vae_loop(config["vae"]) 
 
     else:
         raise ValueError("`train_stage` must be either 1 or 2")
