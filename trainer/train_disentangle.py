@@ -159,6 +159,10 @@ def train_disentangle_loop(config, dataset):
                 + config.get("kl_weight", 0.1) * kl_loss \
                 + config.get("lpips_weight", 0.8) * lpips_loss \
                 + config.get("gan_weight", 0.1) * g_gan_loss
+            
+            if torch.isnan(total_loss): # sanity check 
+                print("NaN in total_loss, skipping backward.")
+                continue
 
             gen_optim.zero_grad(); total_loss.backward(); gen_optim.step()
             losses.append(total_loss.item())
