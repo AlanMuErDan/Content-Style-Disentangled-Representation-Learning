@@ -13,15 +13,15 @@ def get_font_files(font_folder):
             for f in os.listdir(font_folder)
             if f.lower().endswith('.ttf')]
 
-def is_char_supported(font_path, char):
+def extract_supported_chars(font_path):
     try:
         font = TTFont(font_path)
-        for table in font['cmap'].tables:  # character to glyph index mapping 
-            if ord(char) in table.cmap:
-                return True
+        supported = set()
+        for table in font['cmap'].tables:
+            supported.update(table.cmap.keys())
+        return supported
     except Exception:
-        pass
-    return False
+        return set()
 
 def render_char_image(char, font_path, img_size, font_size, mode):
     try:
@@ -35,7 +35,7 @@ def render_char_image(char, font_path, img_size, font_size, mode):
         draw.text((x, y), char, fill=0 if mode == 'L' else (0, 0, 0), font=font)
         return img
     except Exception as e:
-        print(f"Error rendering '{char}' with font {font_path}: {e}")
+        # print(f"Error rendering '{char}' with font {font_path}: {e}")
         return None
 
 # check if a character is safe to use in a filename
@@ -44,36 +44,83 @@ def safe_filename(char):
         return f'uni{ord(char)}'
     return char
 
+# def generate_images(char_list_file, font_folder, output_folder,
+#                     img_size=(128, 128), font_size=100, mode='L'):
+#     os.makedirs(output_folder, exist_ok=True)
+#     all_chars = read_char_list(char_list_file)
+#     font_paths = get_font_files(font_folder)
+#     print(f"{len(font_paths)} fonts found in '{font_folder}'.")
+
+#     # check which characters are supported by all fonts
+#     supported_chars = []
+#     for char in all_chars:
+#         char_supported_by_all = True
+#         for font_path in font_paths:
+#             if not is_char_supported(font_path, char):
+#                 print(f"Char '{char}' is not supported by font {os.path.basename(font_path)}")
+#                 char_supported_by_all = False
+#                 break
+#         if char_supported_by_all:
+#             supported_chars.append(char)
+#     print(f"{len(supported_chars)} / {len(all_chars)} characters are supported by all fonts.")
+
+#     for font_path in tqdm(font_paths, desc="Generating images", unit="font"):
+#         font_name = os.path.splitext(os.path.basename(font_path))[0]
+#         font_output_dir = os.path.join(output_folder, font_name)
+#         os.makedirs(font_output_dir, exist_ok=True)
+
+#         for char in supported_chars:
+#             img = render_char_image(char, font_path, img_size, font_size, mode)
+#             if img:
+#                 filename = f"{font_name}+{safe_filename(char)}.png"
+#                 img.save(os.path.join(font_output_dir, filename))
+
 def generate_images(char_list_file, font_folder, output_folder,
                     img_size=(128, 128), font_size=100, mode='L'):
     os.makedirs(output_folder, exist_ok=True)
-    all_chars = read_char_list(char_list_file)
+    all_chars = [c for c in read_char_list(char_list_file) if len(c) == 1]
     font_paths = get_font_files(font_folder)
     print(f"{len(font_paths)} fonts found in '{font_folder}'.")
 
-    # check which characters are supported by all fonts
-    supported_chars = []
-    for char in all_chars:
-        char_supported_by_all = True
-        for font_path in font_paths:
-            if not is_char_supported(font_path, char):
-                print(f"Char '{char}' is not supported by font {os.path.basename(font_path)}")
-                char_supported_by_all = False
-                break
-        if char_supported_by_all:
-            supported_chars.append(char)
-    print(f"{len(supported_chars)} / {len(all_chars)} characters are supported by all fonts.")
+    char_counts = {}
 
-    for font_path in tqdm(font_paths, desc="Generating images", unit="font"):
+    for font_path in font_paths:
         font_name = os.path.splitext(os.path.basename(font_path))[0]
         font_output_dir = os.path.join(output_folder, font_name)
         os.makedirs(font_output_dir, exist_ok=True)
+
+        supported_codepoints = extract_supported_chars(font_path)
+        supported_chars = [char for char in all_chars if ord(char) in supported_codepoints]
+
+        char_counts[font_name] = len(supported_chars)
+        print(f"{len(supported_chars)} / {len(all_chars)} characters supported by {font_name}")
 
         for char in supported_chars:
             img = render_char_image(char, font_path, img_size, font_size, mode)
             if img:
                 filename = f"{font_name}+{safe_filename(char)}.png"
                 img.save(os.path.join(font_output_dir, filename))
+        
+        # 统计图
+    try:
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+
+        counts = list(char_counts.values())
+        font_names = list(char_counts.keys())
+
+        plt.figure(figsize=(10, 6))
+        sns.histplot(counts, bins=20, kde=True)
+        plt.title("Distribution of Supported Characters per Font")
+        plt.xlabel("Number of Supported Characters")
+        plt.ylabel("Number of Fonts")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, "font_char_support_distribution.png"))
+        plt.close()
+        print("Saved support distribution plot.")
+    except ImportError:
+        print("matplotlib/seaborn not installed; skipping plot.")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Generate character images from fonts.")
