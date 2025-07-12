@@ -17,6 +17,7 @@ vae:
   encoder: vae_encoder          
   decoder: vae_decoder          
   use_gan: true
+  use_ema: true
   latent_dim: 256              
   lpips_weight: 0.8
   kl_weight: 0.2
@@ -24,12 +25,33 @@ vae:
   gan_weight: 0.2
   train_stage: VAE           # Disentangle, VAE
   img_size: 128
-  data_root: ./data
+  train_data_root: ./data/train
+  val_data_root: ./data/val
   batch_size: 32
   epochs: 5000
   lr: 0.0001
   checkpoint_interval: 500
+  resume_ckpt: "" 
   in_channels: 1
+  val_interval: 5000
+  train_log_interval: 100
+
+  # LR scheduler
+  lr_scheduler: linear-warmup_cosine-decay  # or linear-warmup, None
+  warmup_epochs: 10
+  min_lr: 0.00001
+
+  # KL annealing
+  kl_anneal:
+    enabled: true
+    start_epoch: 0
+    end_epoch: 100
+
+  # Gradient clipping
+  gradient_clip_val: 1.0
+
+  # GAN
+  lecam_weight: 0.1
 
 # ==============================
 # DISENTANGLE CONFIGURATION

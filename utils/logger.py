@@ -5,7 +5,7 @@ from torchvision.utils import make_grid
 import torch
 
 def init_wandb(config):
-    wandb.init(project="font-disentangle-week2", config=config)
+    wandb.init(project="font-disentangle-week3", config=config)
 
 def log_images(imgA, recA, crossBA, gt_crossBA, imgB, recB, crossAB, gt_crossAB):
     grid = make_grid(
@@ -17,13 +17,12 @@ def log_images(imgA, recA, crossBA, gt_crossBA, imgB, recB, crossAB, gt_crossAB)
     )
     wandb.log({"recon_vis": [wandb.Image(grid, caption="A(row1): GT→Recon→CrossBA→GT_BA | B(row2): GT→Recon→CrossAB→GT_AB")]})
 
-def log_single_image(img, recon):
-    """Log single input and reconstruction to wandb."""
+def log_single_image(img, recon, split="train"):
     grid = make_grid(
         torch.cat([img[:4], recon[:4]], dim=0),
         nrow=4, normalize=True, scale_each=True
     )
-    wandb.log({"reconstruction_vis": [wandb.Image(grid, caption="Top: Input | Bottom: Recon")]})
+    wandb.log({f"{split}_reconstruction_vis": [wandb.Image(grid, caption=f"{split.capitalize()} | Top: Input | Bottom: Recon")]})
 
 def log_loss(step, loss):
     wandb.log({"loss": loss}, step=step)
