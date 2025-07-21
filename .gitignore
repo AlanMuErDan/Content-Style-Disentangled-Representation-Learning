@@ -3,7 +3,10 @@ fonts/
 char_list.txt 
 log/ 
 checkpoints/ 
+rep_env/
 super_VAE_1.slurm
+super_VAE_new.slurm
 __pycache__/
 *.pyc
 wandb/
+lmdb_data/
