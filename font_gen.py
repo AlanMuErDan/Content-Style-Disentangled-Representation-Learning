@@ -79,29 +79,43 @@ def generate_images(char_list_file, font_folder, output_folder,
                     img_size=(128, 128), font_size=100, mode='L'):
     os.makedirs(output_folder, exist_ok=True)
     all_chars = [c for c in read_char_list(char_list_file) if len(c) == 1]
-    font_paths = get_font_files(font_folder)
+    font_paths = sorted(get_font_files(font_folder))  # 确保顺序一致
     print(f"{len(font_paths)} fonts found in '{font_folder}'.")
 
     char_counts = {}
 
-    for font_path in font_paths:
+    split_idx = 160
+    train_dir = os.path.join(output_folder, 'train')
+    val_dir = os.path.join(output_folder, 'val')
+    os.makedirs(train_dir, exist_ok=True)
+    os.makedirs(val_dir, exist_ok=True)
+
+    for idx, font_path in enumerate(font_paths):
         font_name = os.path.splitext(os.path.basename(font_path))[0]
-        font_output_dir = os.path.join(output_folder, font_name)
+        if idx < split_idx:
+            font_output_dir = os.path.join(train_dir, font_name)
+        else:
+            font_output_dir = os.path.join(val_dir, font_name)
         os.makedirs(font_output_dir, exist_ok=True)
 
         supported_codepoints = extract_supported_chars(font_path)
-        supported_chars = [char for char in all_chars if ord(char) in supported_codepoints]
+        selected_chars = []
+        for char in all_chars:
+            if ord(char) in supported_codepoints:
+                selected_chars.append(char)
+            if len(selected_chars) >= 500:
+                break
 
-        char_counts[font_name] = len(supported_chars)
-        print(f"{len(supported_chars)} / {len(all_chars)} characters supported by {font_name}")
+        char_counts[font_name] = len(selected_chars)
+        print(f"{len(selected_chars)} characters selected for {font_name}")
 
-        for char in supported_chars:
+        for char in selected_chars:
             img = render_char_image(char, font_path, img_size, font_size, mode)
             if img:
                 filename = f"{font_name}+{safe_filename(char)}.png"
                 img.save(os.path.join(font_output_dir, filename))
-        
-        # 统计图
+
+    # 绘图统计
     try:
         import matplotlib.pyplot as plt
         import seaborn as sns
@@ -111,16 +125,17 @@ def generate_images(char_list_file, font_folder, output_folder,
 
         plt.figure(figsize=(10, 6))
         sns.histplot(counts, bins=20, kde=True)
-        plt.title("Distribution of Supported Characters per Font")
-        plt.xlabel("Number of Supported Characters")
+        plt.title("Distribution of Selected Characters per Font (Max 500)")
+        plt.xlabel("Number of Characters")
         plt.ylabel("Number of Fonts")
         plt.grid(True)
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, "font_char_support_distribution.png"))
+        plt.savefig(os.path.join(output_folder, "font_char_selection_distribution.png"))
         plt.close()
         print("Saved support distribution plot.")
     except ImportError:
         print("matplotlib/seaborn not installed; skipping plot.")
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Generate character images from fonts.")

@@ -45,17 +45,19 @@ class UNetDecoder(nn.Module):
 
 class FeatureMapDecoder(DiffusersDecoder):
     def __init__(self,
-                 latent_channels: int = 8,
+                 latent_channels: int = 4,
                  img_size: int = 128,
                  out_channels: int = 1,
                  layers_per_block: int = 2):
-        n_up = int(math.log2(img_size // 8))
-        if 8 * 2 ** n_up != img_size:
-            raise ValueError("img_size must be a power-of-two multiple of 8 (e.g. 32, 64, 128)")
+        target_resolution = 16  # encoder 输出的 spatial size
+        n_up = int(math.log2(img_size // target_resolution))
+
+        if target_resolution * 2 ** n_up != img_size:
+            raise ValueError("img_size must be target_resolution × 2^n (e.g. 16→128)")
 
         up_block_types = ("UpDecoderBlock2D",) * n_up
         block_out_channels = (64,) * (n_up + 1)
-
+        
         super().__init__(
             in_channels=latent_channels,
             out_channels=out_channels,
@@ -74,7 +76,7 @@ class FeatureMapDecoder(DiffusersDecoder):
 
 def build_decoder(name: str = "diff_decoder",
                   latent_dim: Optional[int] = 512,
-                  latent_channels: Optional[int] = 8,
+                  latent_channels: Optional[int] = 4,
                   img_size: int = 128):
     name = name.lower()
 
