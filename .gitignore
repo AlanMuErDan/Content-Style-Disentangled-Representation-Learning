@@ -10,3 +10,4 @@ __pycache__/
 *.pyc
 wandb/
 lmdb_data/
+lmdb_keys.json
