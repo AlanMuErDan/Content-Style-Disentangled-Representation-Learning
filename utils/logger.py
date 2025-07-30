@@ -5,7 +5,7 @@ from torchvision.utils import make_grid
 import torch
 
 def init_wandb(config):
-    wandb.init(project="font-disentangle-week3", config=config)
+    wandb.init(project="font-disentangle-DDPM-week-1", config=config)
 
 def log_images(imgA, recA, crossBA, gt_crossBA, imgB, recB, crossAB, gt_crossAB):
     grid = make_grid(

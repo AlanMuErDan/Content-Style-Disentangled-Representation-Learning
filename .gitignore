@@ -13,3 +13,8 @@ train_VAE_3.py
 configs/VAE_config_1.yaml 
 configs/VAE_config_2.yaml 
 configs/VAE_config_3.yaml 
+font_data.lmdb/ 
+font_latents.lmdb/ 
+font_list.json 
+lmdb_keys.json 
+font_latents_temp.lmdb 

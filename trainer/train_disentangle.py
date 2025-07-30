@@ -1,199 +1,470 @@
+# trainer/train_disentangle.py
+# -------------------------------------------------------------
+#  Content–Style Disentanglement  +  DDPM Denoising (MLP-based)
+# -------------------------------------------------------------
+#  Author : ChatGPT  (2025-07-27)
+#  Requires : PyTorch ≥ 2.1, tqdm, pyyaml
+# -------------------------------------------------------------
 import os
+import json
+import math
+import random
+from pathlib import Path
+from typing import Tuple
+import wandb 
+
 import torch
+import torch.nn.functional as F
+from torch import nn, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from utils.losses import reconstruction_loss, lpips_loss_fn
-from utils.logger import init_wandb, log_images, log_loss, log_epoch, log_losses, log_latents
-from models import build_encoder, build_decoder, build_quantizer
-from models.discriminator import build_discriminator
-import torch.nn.functional as F
 import yaml
-import lpips
 
-# KL loss for feature map (mu, logvar)
-def kl_loss_featuremap(mu, logvar):
-    return 0.5 * torch.sum(mu ** 2 + logvar.exp() - logvar - 1) / mu.numel()
+# -----------------------------
+#  Local modules (existing)
+# -----------------------------
+from dataset.font_dataset import FourWayFontPairLatentLMDBDataset
+from models.mlp import build_residual_mlp, SimpleMLPAdaLN          # ← 已在 models/mlp.py 中实现
+from utils.logger import init_wandb, log_losses, log_images        # ← 如无需要，可屏蔽
 
-# Load config
-config_path = "configs/config.yaml"
-if not os.path.exists(config_path):
-    raise FileNotFoundError(f"Configuration file not found: {config_path}")
-with open(config_path, 'r') as f:
-    config = yaml.safe_load(f)
+# ---------------------------------
+#  New imports for image logging
+# ---------------------------------
+from utils.vae_io import load_models, decode as vae_decode
+import random as pyrand           # 避免与 torch.random 混淆
+from torchvision.utils import make_grid
+from torchvision import transforms
+# -------------------------------------------------------------
 
-start_epoch = 0
-lpips_model = lpips.LPIPS(net='vgg').cuda()
 
-def train_disentangle_loop(config, dataset):
+# =============================================================
+# 1. Diffusion helpers
+# =============================================================
+def make_beta_schedule(timesteps: int = 1000,
+                       beta_start: float = 1e-4,
+                       beta_end: float = 2e-2) -> torch.Tensor:
+    return torch.linspace(beta_start, beta_end, timesteps, dtype=torch.float32)
+
+
+class DDPMNoiseScheduler:
+    """Pre-computes sqrt(ᾱ_t) 等常量，便于训练快速取用。"""
+    def __init__(self, timesteps: int = 1000,
+                 beta_start: float = 1e-4,
+                 beta_end: float = 2e-2,
+                 device: torch.device = torch.device("cpu")) -> None:
+        self.timesteps = timesteps
+        self.betas = make_beta_schedule(timesteps, beta_start, beta_end).to(device)
+        self.alphas = 1.0 - self.betas
+        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
+        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
+        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
+
+    def sample_timesteps(self, batch: int, device: torch.device) -> torch.Tensor:
+        return torch.randint(0, self.timesteps, (batch,), device=device, dtype=torch.long)
+
+    def q_sample(self, x0: torch.Tensor, t: torch.Tensor,
+                 noise: torch.Tensor) -> torch.Tensor:
+        """
+        Forward diffusion：得到 x_t = √ᾱ_t·x0 + √(1-ᾱ_t)·ε
+        """
+        sqrt_alphas_cumprod_t = self.sqrt_alphas_cumprod[t].unsqueeze(1)
+        sqrt_one_minus_alphas_cumprod_t = self.sqrt_one_minus_alphas_cumprod[t].unsqueeze(1)
+        return sqrt_alphas_cumprod_t * x0 + sqrt_one_minus_alphas_cumprod_t * noise
+
+
+# =============================================================
+# 2. Content / Style Encoder  (Residual MLP)
+# =============================================================
+def build_content_style_encoder(cfg: dict) -> nn.Module:
+    """
+    返回一个把 1024-D latent → 2048-D 向量的编码器。
+    “上半 1024 = content, 下半 1024 = style”
+    """
+    return build_residual_mlp(
+        input_dim=cfg.get("input_dim", 1024),
+        hidden_dim=cfg.get("hidden_dim", 2048),
+        num_layers=cfg.get("num_layers", 4),
+    )
+
+
+# =============================================================
+# 3. 配置加载 & 训练主循环
+# =============================================================
+def load_config(cfg_path: str) -> dict:
+    if not os.path.isfile(cfg_path):
+        raise FileNotFoundError(f"Config file not found: {cfg_path}")
+    with open(cfg_path, "r") as f:
+        return yaml.safe_load(f)
+
+
+def split_fonts(json_path: str,
+                train_ratio: float = 0.9,
+                seed: int = 42) -> Tuple[set, set]:
+    """根据字体 list（json）划分  Train / Valid."""
+    with open(json_path, "r") as f:
+        fonts = json.load(f)
+    random.Random(seed).shuffle(fonts)
+    n_train = int(len(fonts) * train_ratio)
+    train_fonts = set(fonts[:n_train])
+    valid_fonts = set(fonts[n_train:])
+    return train_fonts, valid_fonts
+
+
+def filter_dataset_fonts(ds: FourWayFontPairLatentLMDBDataset, allowed_fonts: set) -> None:
+    ds.fonts = [f for f in ds.fonts if f in allowed_fonts]
+    assert len(ds.fonts) > 1, "Filtered dataset 没有足够字体可用"
+
+    # 重新计算 train/valid 子集的公共字符
+    ds.common_chars = list(
+        set.intersection(*(set(ds.data[f].keys()) for f in ds.fonts))
+    )
+    assert len(ds.common_chars) >= 2, "过滤后字体的公共字符不足 2 个"
+
+
+def build_dataloaders(cfg: dict) -> Tuple[DataLoader, DataLoader]:
+    lmdb_path = cfg["dataset"]["lmdb_path"]
+    font_json = cfg["dataset"]["font_json"]
+
+    train_fonts, valid_fonts = split_fonts(
+        font_json,
+        train_ratio=cfg["dataset"].get("train_ratio", 0.9),
+        seed=cfg.get("seed", 1234),
+    )
+
+    print(f"Train fonts: {len(train_fonts)}, Valid fonts: {len(valid_fonts)}")
+
+    # Dataset（共享 env，减少 IO）
+    latent_size = cfg["dataset"].get("latent_size", 16)
+    latent_channels = cfg["dataset"].get("latent_channels", 4)
+    latent_shape = (latent_channels, latent_size, latent_size)
+
+    ds_train = FourWayFontPairLatentLMDBDataset(
+        lmdb_path=lmdb_path,
+        latent_shape=latent_shape,
+        pair_num=10000
+    )
+    print(f"Train dataset loaded: {len(ds_train)} samples")
+
+    ds_valid = FourWayFontPairLatentLMDBDataset(
+        lmdb_path=lmdb_path,
+        pair_num=1000
+    )
+    print(f"Validation dataset loaded: {len(ds_valid)} samples")
+    filter_dataset_fonts(ds_train, train_fonts)
+    filter_dataset_fonts(ds_valid, valid_fonts)
+
+    print(f"Filtered train dataset: {len(ds_train)} samples, "
+          f"Filtered valid dataset: {len(ds_valid)} samples")
+
+    dl_train = DataLoader(
+        ds_train,
+        batch_size=cfg["train"]["batch_size"],
+        shuffle=True,
+        num_workers=cfg.get("num_workers", 4),
+        pin_memory=True,
+        drop_last=True,
+    )
+
+    print(f"Train DataLoader created with batch size {cfg['train']['batch_size']}")
+
+
+    dl_valid = DataLoader(
+        ds_valid,
+        batch_size=cfg["eval"]["batch_size"],
+        shuffle=False,
+        num_workers=cfg.get("num_workers", 4),
+        pin_memory=True,
+        drop_last=False,
+    )
+
+    print(f"Validation DataLoader created with batch size {cfg['eval']['batch_size']}")
+
+    
+    return dl_train, dl_valid
+
+
+def predict_x0(x_t, eps_pred, t_idx, scheduler):
+    """
+    根据  ε̂  反推出  x̂_0 ；x_t / eps_pred shape = (B, 1024)
+    """
+    dev = x_t.device
+    sqrt_alpha_bar_t = scheduler.sqrt_alphas_cumprod[t_idx].to(dev).view(-1, 1)
+    sqrt_one_minus   = scheduler.sqrt_one_minus_alphas_cumprod[t_idx].to(dev).view(-1, 1)
+    return (x_t - sqrt_one_minus * eps_pred) / sqrt_alpha_bar_t
+
+def log_sample_images(step, batch, eps_pred_1, eps_pred_2,
+                      t_idx, scheduler, decoder, vae_cfg, device):
+    """
+    随机取 4 组 → 6 张图：原始 AA / BB，GT AB / BA，Pred AB / BA
+    """
+    # ----------- 从 batch 随机抽 4 个索引 -----------
+    B = batch["F_A+C_A"].size(0)
+    sel = pyrand.sample(range(B), k=min(4, B))
+
+    imgs = []  # 将拼成一张 grid 上传
+    for i in sel:
+        # --- 1) 原始 self-recon （content+style 保持一致）---
+        fa_ca = batch["F_A+C_A"][i]
+        fb_cb = batch["F_B+C_B"][i]
+
+        # --- 2) GT cross-pair latent ---
+        fa_cb_gt = batch["F_A+C_B"][i]
+        fb_ca_gt = batch["F_B+C_A"][i]
+
+        # --- 3) 预测的 cross-pair latent ---
+        x_t_fb_ca = batch["x_t_fb_ca"][i]     # 见 evaluate() 修改
+        x_t_fa_cb = batch["x_t_fa_cb"][i]
+
+        # 使用训练时得到的 eps_pred（已经是对应 index 预测的）
+        fa_cb_pred = predict_x0(
+            x_t_fa_cb, eps_pred_2[i], t_idx[i], scheduler
+        ).reshape(fa_cb_gt.shape)
+        fb_ca_pred = predict_x0(
+            x_t_fb_ca, eps_pred_1[i], t_idx[i], scheduler
+        ).reshape(fb_ca_gt.shape)
+
+        # ---- Decode 6 latent → PIL ----
+        for lat in (fa_ca, fb_cb, fa_cb_gt, fb_ca_gt, fa_cb_pred, fb_ca_pred):
+            pil = vae_decode(lat.cpu(), decoder, vae_cfg, device)
+            imgs.append(pil)
+
+    # --------- 拼 grid & 上传 ---------
+    grid = make_grid(
+        torch.stack([transforms.ToTensor()(p) for p in imgs]), nrow=6, padding=2
+    )
+
+    wandb.log({"val/quad_grid": wandb.Image(grid)}, step=step)
+
+
+def train(cfg: dict):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.autograd.set_detect_anomaly(True)
+    print(f"Using device: {device}")
+    seed = cfg.get("seed", 1234)
+    torch.manual_seed(seed)
+    random.seed(seed)
 
-    use_gan = config.get("use_gan", False)
-    print(f"Using GAN: {use_gan}")
+    # ----------  VAE decoder for visualisation ----------
+    vae_cfg_path = cfg["vis"]["vae_config"]
+    vae_ckpt_path = cfg["vis"]["vae_ckpt"]
+    encoder_vae, decoder_vae, vae_cfg, _ = load_models(
+        vae_cfg_path, vae_ckpt_path, device
+    )
+    print("[Vis] VAE decoder ready.")
 
-    # Build models (FeatureMap encoder)
-    encoder_c = build_encoder(config['encoder_c'], img_size=config['img_size']).to(device)
-    encoder_s = build_encoder(config['encoder_s'], img_size=config['img_size']).to(device)
-    decoder = build_decoder(config['decoder'], img_size=config['img_size'], latent_channels=16).to(device)
-    if use_gan:
-        discriminator = build_discriminator(config).to(device)
+    # ---------------  Dataset / Dataloader  ---------------
+    dl_train, dl_valid = build_dataloaders(cfg)
 
-    vq_dict = build_quantizer(config)
-    if vq_dict.get("content"):
-        vq_dict["content"] = vq_dict["content"].to(device)
-    if vq_dict.get("style"):
-        vq_dict["style"] = vq_dict["style"].to(device)
+    # ---------------  Models ---------------
+    encoder = build_content_style_encoder(cfg["encoder"]).to(device)
+    print("---------------  Encoder ---------------")
+    print(f"Encoder: {encoder}")
 
-    # Resume checkpoint
-    resume_ckpt_path = config.get("resume_ckpt", "")
-    if resume_ckpt_path and os.path.isfile(resume_ckpt_path):
-        print(f"Resuming from checkpoint: {resume_ckpt_path}")
-        ckpt = torch.load(resume_ckpt_path, map_location=device)
-        encoder_c.load_state_dict(ckpt["encoder_c"])
-        encoder_s.load_state_dict(ckpt["encoder_s"])
-        decoder.load_state_dict(ckpt["decoder"])
-        if "vq_content" in ckpt and vq_dict.get("content"):
-            vq_dict["content"].load_state_dict(ckpt["vq_content"])
-        if "vq_style" in ckpt and vq_dict.get("style"):
-            vq_dict["style"].load_state_dict(ckpt["vq_style"])
-        global start_epoch
-        start_epoch = ckpt.get("epoch", 0) + 1
+    denoiser = SimpleMLPAdaLN(
+        in_channels=1024,                     # x_t shape
+        model_channels=cfg["denoiser"]["model_channels"],
+        out_channels=1024,                    # predict ε
+        z_channels=2048,                      # condition vector
+        num_res_blocks=cfg["denoiser"].get("num_res_blocks", 4),
+        grad_checkpointing=cfg["denoiser"].get("grad_ckpt", False),
+    ).to(device)
+    print("---------------  Denoiser ---------------")
+    print(f"Denoiser: {denoiser}")
 
-    gen_modules = [encoder_c, encoder_s, decoder]
-    if vq_dict.get("content"):
-        gen_modules.append(vq_dict["content"])
-    if vq_dict.get("style"):
-        gen_modules.append(vq_dict["style"])
-    gen_optim = torch.optim.Adam([p for m in gen_modules for p in m.parameters()], lr=config['lr'])
-    if use_gan:
-        disc_optim = torch.optim.Adam(discriminator.parameters(), lr=config['lr'])
+    # ---------------  Optimizer & Scheduler ---------------
+    opt = optim.AdamW(
+        list(encoder.parameters()) + list(denoiser.parameters()),
+        lr=cfg["train"]["lr"],
+        betas=(0.9, 0.999),
+        weight_decay=cfg["train"].get("weight_decay", 0.0),
+    )
 
-    dataloader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=True, num_workers=1)
-    init_wandb(config)
+    # ---------------  Diffusion Schedule ---------------
+    scheduler = DDPMNoiseScheduler(
+        timesteps   = cfg["denoiser"].get("timesteps", 1000),
+        beta_start  = float(cfg["denoiser"].get("beta_start", 1e-4)),
+        beta_end    = float(cfg["denoiser"].get("beta_end",  2e-2)),
+        device=device,
+    )
 
-    for epoch in range(start_epoch, config['epochs']):
-        encoder_c.train(); encoder_s.train(); decoder.train()
-        if use_gan:
-            discriminator.train()
-        losses = []
+    # ---------------  Logging ---------------
+    if cfg.get("wandb", {}).get("enable", False):
+        init_wandb(cfg)
 
-        for i, (imgA, imgB, gt_crossAB, gt_crossBA) in tqdm(enumerate(dataloader), total=len(dataloader), desc=f"Epoch {epoch+1}/{config['epochs']}"):
-            imgA, imgB = imgA.to(device), imgB.to(device)
-            gt_crossAB, gt_crossBA = gt_crossAB.to(device), gt_crossBA.to(device)
+    # ======================================================
+    #                >>>  TRAIN LOOP  <<<
+    # ======================================================
+    step = 0
+    for epoch in range(cfg["train"]["epochs"]):
+        print(f"\n=== Epoch {epoch + 1}/{cfg['train']['epochs']} ===")
+        encoder.train(); denoiser.train()
+        pbar = tqdm(dl_train, desc=f"Epoch {epoch+1}/{cfg['train']['epochs']}")
+        for batch in pbar:
+            # --------------------------------------------
+            # 1. 取四元组 latent，并 flatten 为 (B, 1024)
+            # --------------------------------------------
+            x_fa_ca = batch["F_A+C_A"].to(device).reshape(batch["F_A+C_A"].size(0), -1)
+            x_fa_cb = batch["F_A+C_B"].to(device).reshape(batch["F_A+C_B"].size(0), -1)
+            x_fb_ca = batch["F_B+C_A"].to(device).reshape(batch["F_B+C_A"].size(0), -1)
+            x_fb_cb = batch["F_B+C_B"].to(device).reshape(batch["F_B+C_B"].size(0), -1)
 
-            # Encode + reparameterize
-            mu_cA, logvar_cA = encoder_c(imgA)
-            mu_cB, logvar_cB = encoder_c(imgB)
-            mu_sA, logvar_sA = encoder_s(imgA)
-            mu_sB, logvar_sB = encoder_s(imgB)
-            zcA = mu_cA + torch.randn_like(logvar_cA) * torch.exp(0.5 * logvar_cA)
-            zcB = mu_cB + torch.randn_like(logvar_cB) * torch.exp(0.5 * logvar_cB)
-            zsA = mu_sA + torch.randn_like(logvar_sA) * torch.exp(0.5 * logvar_sA)
-            zsB = mu_sB + torch.randn_like(logvar_sB) * torch.exp(0.5 * logvar_sB)
+            # print(f"Batch size: {x_fa_ca.size(0)}")
 
-            print(zcA.shape)
-            print(zsA.shape)
 
-            # VQ
-            vq_loss = 0.0
-            if vq_dict.get("content"):
-                zcA, loss_contentA = vq_dict["content"](zcA)
-                zcB, loss_contentB = vq_dict["content"](zcB)
-                vq_loss += (loss_contentA + loss_contentB) / 2
-            if vq_dict.get("style"):
-                zsA, loss_styleA = vq_dict["style"](zsA)
-                zsB, loss_styleB = vq_dict["style"](zsB)
-                vq_loss += (loss_styleA + loss_styleB) / 2
+            # --------------------------------------------
+            # 2. 编码  (content | style)
+            # --------------------------------------------
+            z_fa_ca = encoder(x_fa_ca)   # (B, 2048)
+            z_fb_cb = encoder(x_fb_cb)   # (B, 2048)
 
-            if use_gan:
-                recA_detach = decoder(torch.cat([zsA, zcA], dim=1)).detach()
-                recB_detach = decoder(torch.cat([zsB, zcB], dim=1)).detach()
-                real = torch.cat([imgA, imgB], dim=0)
-                fake = torch.cat([recA_detach, recB_detach], dim=0)
-                real_pred = discriminator(real)
-                fake_pred = discriminator(fake)
-                # d_loss = F.relu(1.0 - real_pred).mean() + F.relu(1.0 + fake_pred).mean()
-                d_loss_gan = F.relu(1.0 - real_pred).mean() + F.relu(1.0 + fake_pred).mean()
+            # print(f"Encoded shapes: z_fa_ca: {z_fa_ca.shape}, z_fb_cb: {z_fb_cb.shape}")
 
-                # LeCam 正则项
-                lecam_reg = ((real_pred - fake_pred) ** 2).mean()
-                lambda_lecam = config.get("lecam_weight", 0.1)
+            content_fa = z_fa_ca[:, :1024]    # c_A
+            style_fb  = z_fb_cb[:, 1024:]     # s_B
 
-                d_loss = d_loss_gan + lambda_lecam * lecam_reg
-                
-                disc_optim.zero_grad(); d_loss.backward(); disc_optim.step()
-            else:
-                d_loss = torch.tensor(0.0, device=device)
+            content_fb = z_fb_cb[:, :1024]    # c_B
+            style_fa   = z_fa_ca[:, 1024:]    # s_A
 
-            recA = decoder(torch.cat([zsA, zcA], dim=1))
-            recB = decoder(torch.cat([zsB, zcB], dim=1))
-            crossAB = decoder(torch.cat([zcA, zsB], dim=1))
-            crossBA = decoder(torch.cat([zcB, zsA], dim=1))
+            # 条件向量
+            cond_cA_sB = torch.cat([content_fa, style_fb], dim=1)   # 用于 denoise x_fb_ca
+            cond_cB_sA = torch.cat([content_fb, style_fa], dim=1)   # 用于 denoise x_fa_cb
 
-            print(recA.shape)
+            # print(f"The shape of condition cA_sB: {cond_cA_sB.shape}, cB_sA: {cond_cB_sA.shape}")
 
-            recon_loss = (
-                reconstruction_loss(recA, imgA) +
-                reconstruction_loss(recB, imgB) +
-                reconstruction_loss(crossAB, gt_crossAB) +
-                reconstruction_loss(crossBA, gt_crossBA)
-            ) / 4
+            # --------------------------------------------
+            # 3. 前向扩散 (q_sample)
+            # --------------------------------------------
+            B = x_fb_ca.size(0)
+            t = scheduler.sample_timesteps(B, device)        # 随机 t∈[0,T)
+            noise = torch.randn_like(x_fb_ca)
+            x_t_fb_ca = scheduler.q_sample(x_fb_ca, t, noise)
 
-            lpips_loss = lpips_loss_fn(lpips_model, [recA, recB, crossAB, crossBA], [imgA, imgB, gt_crossAB, gt_crossBA])
-            kl_loss = (
-                kl_loss_featuremap(mu_cA, logvar_cA) +
-                kl_loss_featuremap(mu_cB, logvar_cB) +
-                kl_loss_featuremap(mu_sA, logvar_sA) +
-                kl_loss_featuremap(mu_sB, logvar_sB)
-            ) / 4
+            noise2 = torch.randn_like(x_fa_cb)
+            x_t_fa_cb = scheduler.q_sample(x_fa_cb, t, noise2)  # 共享同一 t，可简化；也可单独采样
 
-            if use_gan:
-                fake = torch.cat([recA, recB], dim=0)
-                fake_pred = discriminator(fake)
-                g_gan_loss = -fake_pred.mean()
-            else:
-                g_gan_loss = torch.tensor(0.0, device=device)
+            # --------------------------------------------
+            # 4. 噪声预测  ε_θ(x_t, t, cond)
+            # --------------------------------------------
+            eps_pred_1 = denoiser(x_t_fb_ca, t, cond_cA_sB)
+            eps_pred_2 = denoiser(x_t_fa_cb, t, cond_cB_sA)
 
-            total_loss = recon_loss \
-                + config.get("vq_loss_weight", 1.0) * vq_loss \
-                + config.get("kl_weight", 0.1) * kl_loss \
-                + config.get("lpips_weight", 0.8) * lpips_loss \
-                + config.get("gan_weight", 0.1) * g_gan_loss
-            
-            if torch.isnan(total_loss): # sanity check 
-                print("NaN in total_loss, skipping backward.")
-                continue
+            loss_1 = F.mse_loss(eps_pred_1, noise)
+            loss_2 = F.mse_loss(eps_pred_2, noise2)
+            loss = 0.5 * (loss_1 + loss_2)
 
-            gen_optim.zero_grad(); total_loss.backward(); gen_optim.step()
-            losses.append(total_loss.item())
+            # print(f"Loss 1: {loss_1.item():.4f}, Loss 2: {loss_2.item():.4f}, Total Loss: {loss.item():.4f}")
 
-            if i % 100 == 0:
-                log_images(imgA, recA, crossBA, gt_crossBA, imgB, recB, crossAB, gt_crossAB)
-                log_loss(step=epoch * 1000 + i, loss=total_loss.item())
-                log_losses(step=epoch * 1000 + i, loss_dict={
-                    "kl_loss": kl_loss.item(),
-                    "lpips_loss": lpips_loss.item(),
-                    "recon_l2": recon_loss.item(),
-                    "gan_gen_loss": g_gan_loss.item(),
-                    "gan_disc_loss": d_loss.item()
-                })
-                log_latents(epoch * 1000 + i, zcA=zcA, zsA=zsA)
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(list(encoder.parameters()) +
+                                           list(denoiser.parameters()),
+                                           max_norm=1.0)
+            opt.step()
 
-        avg_loss = sum(losses) / len(losses)
-        print(f"[Epoch {epoch}] Avg Loss: {avg_loss:.4f}")
-        log_epoch(epoch, avg_loss)
+            # 记录
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+            if cfg.get("wandb", {}).get("enable", False) and step % cfg["wandb"].get("log_interval", 50) == 0:
+                log_losses(step=step, loss_dict={"train/loss": loss.item()})
+            step += 1
 
-        ckpt = {
-            "encoder_c": encoder_c.state_dict(),
-            "encoder_s": encoder_s.state_dict(),
-            "decoder": decoder.state_dict(),
-            "epoch": epoch
-        }
-        if vq_dict.get("content"):
-            ckpt["vq_content"] = vq_dict["content"].state_dict()
-        if vq_dict.get("style"):
-            ckpt["vq_style"] = vq_dict["style"].state_dict()
+        # ==================================================
+        #             Validation  (optional)
+        # ==================================================
+        if (epoch + 1) % cfg["eval"]["interval"] == 0:
+            val_loss, vis_batch, vis_e1, vis_e2, vis_t = evaluate(
+                 dl_valid, encoder, denoiser, scheduler, device
+            )
+            if cfg.get("wandb", {}).get("enable", False):
+                log_losses(step=step, loss_dict={"valid/loss": val_loss})
+                # ---- 可视化，开关由 cfg 控制 ----
+                if cfg["vis"].get("enable", True):
+                    log_sample_images(
+                        step, vis_batch, vis_e1, vis_e2,
+                        vis_t, scheduler, decoder_vae, vae_cfg, device
+                    )
 
-        if (epoch + 1) % config.get("checkpoint_interval", 1) == 0:
-            os.makedirs("checkpoints", exist_ok=True)
-            torch.save(ckpt, f"checkpoints/ckpt_epoch_{epoch}.pth")
+        # Save ckpt
+        if (epoch + 1) % cfg["train"]["save_interval"] == 0:
+            save_ckpt(cfg, epoch, encoder, denoiser, opt)
+
+
+@torch.no_grad()
+def evaluate(dataloader: DataLoader,
+             encoder: nn.Module,
+             denoiser: nn.Module,
+             scheduler: DDPMNoiseScheduler,
+             device: torch.device) -> float:
+    encoder.eval(); denoiser.eval()
+    sample_batch = None
+    sample_eps1 = sample_eps2 = sample_t = None
+    losses = []
+    for batch in dataloader:
+        x_fa_ca = batch["F_A+C_A"].to(device).reshape(batch["F_A+C_A"].size(0), -1)
+        x_fa_cb = batch["F_A+C_B"].to(device).reshape(batch["F_A+C_B"].size(0), -1)
+        x_fb_ca = batch["F_B+C_A"].to(device).reshape(batch["F_B+C_A"].size(0), -1)
+        x_fb_cb = batch["F_B+C_B"].to(device).reshape(batch["F_B+C_B"].size(0), -1)
+
+        z_fa_ca = encoder(x_fa_ca)
+        z_fb_cb = encoder(x_fb_cb)
+
+        content_fa, style_fb = z_fa_ca[:, :1024], z_fb_cb[:, 1024:]
+        content_fb, style_fa = z_fb_cb[:, :1024], z_fa_ca[:, 1024:]
+
+        cond_cA_sB = torch.cat([content_fa, style_fb], dim=1)
+        cond_cB_sA = torch.cat([content_fb, style_fa], dim=1)
+
+        B = x_fb_ca.size(0)
+        t = scheduler.sample_timesteps(B, device)
+        noise = torch.randn_like(x_fb_ca)
+        noise2 = torch.randn_like(x_fa_cb)
+        x_t_fb_ca = scheduler.q_sample(x_fb_ca, t, noise)
+        x_t_fa_cb = scheduler.q_sample(x_fa_cb, t, noise2)
+
+        eps_pred_1 = denoiser(x_t_fb_ca, t, cond_cA_sB)
+        eps_pred_2 = denoiser(x_t_fa_cb, t, cond_cB_sA)
+
+        loss_1 = F.mse_loss(eps_pred_1, noise, reduction="mean")
+        loss_2 = F.mse_loss(eps_pred_2, noise2, reduction="mean")
+        losses.append(0.5 * (loss_1 + loss_2).item())
+
+        if sample_batch is None:               # 只保存第一批用于可视化
+            sample_batch = {
+                k: (v.clone() if torch.is_tensor(v) else v)
+                for k, v in batch.items()
+                }
+            sample_batch["x_t_fb_ca"] = x_t_fb_ca.cpu()
+            sample_batch["x_t_fa_cb"] = x_t_fa_cb.cpu()
+            sample_eps1 = eps_pred_1.detach().cpu()
+            sample_eps2 = eps_pred_2.detach().cpu()
+            sample_t = t.cpu()
+
+    avg_loss = sum(losses) / len(losses)        
+    return avg_loss, sample_batch, sample_eps1, sample_eps2, sample_t
+
+
+def save_ckpt(cfg: dict, epoch: int,
+              encoder: nn.Module,
+              denoiser: nn.Module,
+              optimizer: optim.Optimizer) -> None:
+    ckpt_dir = Path(cfg["train"]["ckpt_dir"])
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = ckpt_dir / f"epoch_{epoch:04d}.pth"
+    ckpt = {
+        "epoch": epoch,
+        "encoder": encoder.state_dict(),
+        "denoiser": denoiser.state_dict(),
+        "optimizer": optimizer.state_dict(),
+    }
+    torch.save(ckpt, ckpt_path)
+
+
+# =============================================================
+# 4. CLI
+# =============================================================
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default="configs/ddpm_disentangle.yaml")
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
+    train(cfg)
