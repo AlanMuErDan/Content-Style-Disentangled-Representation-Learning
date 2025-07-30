@@ -43,19 +43,48 @@ class UNetDecoder(nn.Module):
 
 
 
-class FeatureMapDecoder(DiffusersDecoder):
+# class FeatureMapDecoder(DiffusersDecoder):  # 8x8 
+#     def __init__(self,
+#                  latent_channels: int = 16,
+#                  img_size: int = 128,
+#                  out_channels: int = 1,
+#                  layers_per_block: int = 2):
+#         n_up = int(math.log2(img_size // 8))
+#         if 8 * 2 ** n_up != img_size:
+#             raise ValueError("img_size must be a power-of-two multiple of 8 (e.g. 32, 64, 128)")
+
+#         up_block_types = ("UpDecoderBlock2D",) * n_up
+#         block_out_channels = (64,) * (n_up + 1)
+
+#         super().__init__(
+#             in_channels=latent_channels,
+#             out_channels=out_channels,
+#             up_block_types=up_block_types,
+#             block_out_channels=block_out_channels,
+#             layers_per_block=layers_per_block,
+#             norm_num_groups=8,
+#             act_fn="silu",
+#         )
+    
+#     def forward(self, z: torch.Tensor) -> torch.Tensor:
+#         x = super().forward(z)  # [B, 1, 128, 128], unbounded output
+#         return torch.tanh(x)    
+
+class FeatureMapDecoder(DiffusersDecoder): # 16 x 16
     def __init__(self,
-                 latent_channels: int = 8,
+                 latent_channels: int = 4,
                  img_size: int = 128,
                  out_channels: int = 1,
                  layers_per_block: int = 2):
-        n_up = int(math.log2(img_size // 8))
-        if 8 * 2 ** n_up != img_size:
-            raise ValueError("img_size must be a power-of-two multiple of 8 (e.g. 32, 64, 128)")
+        target_resolution = 16  # encoder 输出的 spatial size
+        n_up = int(math.log2(img_size // target_resolution))
+
+        if target_resolution * 2 ** n_up != img_size:
+            raise ValueError("img_size must be target_resolution × 2^n (e.g. 16→128)")
 
         up_block_types = ("UpDecoderBlock2D",) * n_up
         block_out_channels = (64,) * (n_up + 1)
-
+        
         super().__init__(
             in_channels=latent_channels,
             out_channels=out_channels,
@@ -68,7 +97,7 @@ class FeatureMapDecoder(DiffusersDecoder):
     
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         x = super().forward(z)  # [B, 1, 128, 128], unbounded output
-        return torch.tanh(x)    
+        return torch.tanh(x)  
 
 
 
