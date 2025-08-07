@@ -17,9 +17,8 @@ from dataset.font_dataset import get_all_lmdb_keys
 from models import build_encoder
 from utils.save_ckpt import build_state_dict
 
-# =====================
-# 手动指定路径和参数
-# =====================
+
+
 CONFIG_PATH   = "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/configs/config.yaml"
 CKPT_PATH     = "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/checkpoints/20250723_121344_super_vae_16*16*4_seed10086/best_ckpt.pth"
 SRC_LMDB_PATH = "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/lmdb_data"
@@ -28,13 +27,13 @@ CHAR_LIST_PATH = "/scratch/rw3239/Content-Style-Disentangled-Representation-Lear
 CACHE_PATH = "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/lmdb_keys.json"
 BATCH_SIZE    = 64
 
-# =====================
-# Utility Functions
-# =====================
+
+
 def load_config(config_path):
     with open(config_path, 'r') as f:
         cfg = yaml.safe_load(f)
     return cfg['vae'] if 'vae' in cfg else cfg
+
 
 
 def load_checkpoint(encoder, ckpt_path, device):
@@ -43,18 +42,26 @@ def load_checkpoint(encoder, ckpt_path, device):
     encoder.eval()
     return encoder
 
+
+
 def to_bytes(k):
     return k if isinstance(k, bytes) else k.encode("utf-8")
+
+
 
 def decode_lmdb_image(value_bytes):
     buffer = io.BytesIO(value_bytes)
     image = Image.open(buffer).convert("L") 
     return image
 
+
+
 def load_char_list(char_file_path):
     with open(char_file_path, 'r', encoding='utf-8') as f:
         chars = set(line.strip() for line in f if line.strip())
     return chars
+
+
 
 def save_latents_to_lmdb(encoder, keys, src_lmdb_path, tgt_lmdb_path, device, img_size=128, batch_size=64):
     env_src = lmdb.open(src_lmdb_path, readonly=True, lock=False, readahead=False)
@@ -87,9 +94,7 @@ def save_latents_to_lmdb(encoder, keys, src_lmdb_path, tgt_lmdb_path, device, im
                 txn_tgt.put(to_bytes(key), pickle.dumps(latent.cpu().numpy()))
 
 
-# =====================
-# Main Logic
-# =====================
+
 def main():
     config = load_config(CONFIG_PATH)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

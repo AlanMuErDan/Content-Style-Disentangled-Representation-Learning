@@ -1,22 +1,13 @@
 # utils/vae_io.py
-# -------------------------------------------------
-#  Unified Encode / Decode utilities for VAE models
-#  (Python 3.9-compatible type annotations)
-# -------------------------------------------------
+
 import os, io, yaml, torch
 from typing import Tuple, Union, Optional
 from PIL import Image
 from torchvision import transforms
-
-# ------------------------------------------------------------------
-#  Local deps – make sure the project root is on PYTHONPATH
-# ------------------------------------------------------------------
 from models import build_encoder, build_decoder
 
 
-# -------------------------------------------------
-#  Internal helpers
-# -------------------------------------------------
+
 def _load_config(path: str) -> dict:
     with open(path, "r") as f:
         cfg = yaml.safe_load(f)
@@ -31,23 +22,12 @@ def _to_pil(img_or_tensor: Union[Image.Image, torch.Tensor]) -> Image.Image:
     raise TypeError("Input must be PIL.Image or 3-D torch.Tensor.")
 
 
-# -------------------------------------------------
-#  Public API
-# -------------------------------------------------
 def load_models(
     config_path: str,
     ckpt_path: str,
     device: Optional[torch.device] = None,
 ) -> Tuple[torch.nn.Module, torch.nn.Module, dict, torch.device]:
-    """
-    Build encoder / decoder from YAML config and load weights.
 
-    Returns:
-        encoder  – torch.nn.Module (eval mode)
-        decoder  – torch.nn.Module (eval mode)
-        cfg      – dict (the 'vae' section of config)
-        device   – torch.device actually used
-    """
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cfg = _load_config(config_path)
 
@@ -76,11 +56,7 @@ def encode(
     cfg: dict,
     device: torch.device,
 ) -> torch.Tensor:
-    """
-    Encode a single image (PIL or Tensor CHW) → latent Tensor [C,H,W].
 
-    Returns latent mean μ (no sampling).
-    """
     pil = _to_pil(img)
 
     preprocess = transforms.Compose([
@@ -100,9 +76,7 @@ def decode(
     cfg: dict,
     device: torch.device,
 ) -> Image.Image:
-    """
-    Decode a latent Tensor [C,H,W] → reconstructed PIL.Image (grayscale).
-    """
+
     if latent.dim() != 3:
         raise ValueError("Latent must have shape [C,H,W].")
     z = latent.unsqueeze(0).to(device)           # [1,C,H,W]

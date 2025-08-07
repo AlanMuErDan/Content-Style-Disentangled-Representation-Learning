@@ -3,6 +3,7 @@
 import wandb
 from torchvision.utils import make_grid
 import torch
+import random 
 
 def init_wandb(config):
     wandb.init(project="font-disentangle-DDPM-week-1", config=config)

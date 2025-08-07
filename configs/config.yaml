@@ -1,7 +1,5 @@
-# ==============================
 # GLOBAL CONFIGURATION
-# ==============================
-train_stage: disentangle           # Disentangle, VAE
+train_stage: disentangle           # disentangle / VAE
 img_size: 128
 data_dir: ./data
 batch_size: 32
@@ -11,12 +9,13 @@ checkpoint_interval: 25
 in_channels: 1
 seed: 10086
 
-# ==============================
+
+
+
+
 # VAE CONFIGURATION
-# ==============================
 vae:
-  # Experiment & Saving
-  train_stage: disentangle           # Disentangle, VAE
+  train_stage: disentangle        
   experiment_name: super_vae_baseline
   seed: 10086     
   batch_size: 32
@@ -24,7 +23,7 @@ vae:
   lr: 0.0001
   ckpt_to_cpu: true          
   train_log_interval: 200 
-  val_interval: 50 #5000
+  val_interval: 50  #5000
 
   # Data 
   train_data_root: /scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_data.lmdb
@@ -43,57 +42,57 @@ vae:
   latent_dim: 256
   latent_chanels: 4
 
-  # ---- Loss Weights ----
+  # Loss Weights
   kl_weight: 0   #0.2
   vq_loss_weight: 1.0
   gan_weight: 0.2
   lecam_weight: 0.05
   lpips_weight: 0.8
 
-  # ---- LR Scheduler ----
-  lr_scheduler: linear-warmup_cosine-decay  # or linear-warmup, None
+  # LR Scheduler 
+  lr_scheduler: linear-warmup_cosine-decay 
   warmup_epochs: 10 
   min_lr: 0.00001
 
-  # ---- KL Annealing ----
+  # KL Annealing
   kl_anneal:
     enabled: false
     start_epoch: 0
     end_epoch: 100
 
-  # ---- Gradient ----
+  # Gradient Clipping
   gradient_clip_val: 1.0
 
 
-# ==============================
+
+
+
 # DISENTANGLE CONFIGURATION
-# ==============================
 disentangle:
   seed: 10086
 
-  # -------------------------------------------------------------
   dataset:
     lmdb_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents.lmdb"
+    stats_yaml: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/latent_stats.yaml"
     font_json: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_list.json"
     train_ratio: 0.9
     latent_size: 16          # 16×16×4 → flatten 1024
     augment_prob: 0.0
 
-  # -------------------------------------------------------------
-  encoder:            # Residual MLP
+  encoder:   # residual MLP 
     input_dim: 1024
     hidden_dim: 2048
     num_layers: 4
 
-  denoiser:           # SimpleMLPAdaLN
+  denoiser:   # SimpleMLPAdaLN  
     model_channels: 2048
     num_res_blocks: 4
+    beta_schedule: "cosine"
     timesteps: 1000
     beta_start: 1e-4
     beta_end: 2e-2
     grad_ckpt: false
 
-  # -------------------------------------------------------------
   train:
     epochs: 1000
     batch_size: 256
@@ -104,7 +103,7 @@ disentangle:
 
   eval:
     batch_size: 256
-    interval: 1        # 每 5 个 epoch 跑一次验证集
+    interval: 1       # validation after every epoch 
 
   num_workers: 1
 
@@ -117,4 +116,8 @@ disentangle:
     enable: true           # 关闭可设 false
     vae_config: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/config.yaml"
     vae_ckpt:   "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/vae_best_ckpt.pth"
+  
+  sample:
+    steps: 50                 # 采样步数
+    train_interval_step: 500  # 每 500 step 记录一次训练采样
 

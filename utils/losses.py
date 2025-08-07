@@ -4,16 +4,16 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 
-# ---------------- Reconstruction Loss ----------------
+# reconstruction loss 
 def reconstruction_loss(pred, target):
     return F.l1_loss(pred, target)
 
-# ---------------- KL Penalty ----------------
+# KL penalty 
 def kl_penalty(*latents):
     """Compute KL loss as L2 norm over multiple latent vectors."""
     return sum([z.pow(2).mean() for z in latents]) / len(latents)
 
-# ---------------- LPIPS Loss ----------------
+# LPIPS loss 
 def lpips_loss_fn(lpips_model, preds, targets):
     loss = 0
     for p, t in zip(preds, targets):
@@ -24,7 +24,7 @@ def lpips_loss_fn(lpips_model, preds, targets):
         loss += d.mean()
     return loss / len(preds)
 
-# ---------------- GAN Loss Module ----------------
+# GAN loss module 
 class GANLossModule(nn.Module):
     def __init__(self, discriminator, gan_type="hinge", lecam_weight=0.1):
         super().__init__()
