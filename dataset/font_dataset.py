@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import torch
 from tqdm import tqdm 
 import json 
+from typing import Tuple
+import pickle
 
 
 def augment_image(img: Image.Image) -> Image.Image:
@@ -189,6 +191,103 @@ class FontPairLMDBDataset(Dataset):
         return img
 
 
+class FourWayFontPairLatentLMDBDataset(Dataset):
+    """
+    用于加载 VAE latent 的 Dataset，用于 DDPM 阶段。
+
+    key 格式: "font+char"
+    value 是 torch.save 的 latent tensor (shape = [C, H, W])
+    """
+    def __init__(self,
+                 lmdb_path: str,
+                 latent_shape: Tuple[int, int, int] = (4, 16, 16),
+                 max_retry: int = 1000,
+                 pair_num: int = 1000):
+
+        self.env = lmdb.open(lmdb_path, readonly=True,
+                             lock=False, readahead=False)
+        self.latent_shape = latent_shape
+        self.max_retry = max_retry
+        self.pair_num = pair_num
+
+        # ---------- 1. 扫描全部 key ----------
+        self.data = {}  # font -> {char: bytes_key}
+        with self.env.begin() as txn:
+            for k_bytes, _ in tqdm(txn.cursor(), desc="Scanning latent LMDB keys", unit="key"):
+                try:
+                    k_str = k_bytes.decode("utf-8")
+                    font, char = k_str.split("+", 1)
+                    self.data.setdefault(font, {})[char] = k_bytes
+                except Exception:
+                    continue
+
+        self.fonts = list(self.data.keys())
+        self.common_chars = list(
+            set.intersection(*(set(chars.keys()) for chars in self.data.values()))
+        )
+
+        print(f"[LatentDataset] Found {len(self.fonts)} fonts and {len(self.common_chars)} common chars.")
+        assert len(self.fonts) >= 2 and len(self.common_chars) >= 2, \
+            "Too few fonts or shared characters in latent LMDB"
+
+    def __len__(self):
+        return int(self.pair_num)  # 抽样式数据集，无需设置精确长度
+
+    def __getitem__(self, idx):
+        with self.env.begin() as txn:
+            for _ in range(self.max_retry):
+                try:
+                    f_a, f_b = random.sample(self.fonts, 2)
+                    c_a, c_b = random.sample(self.common_chars, 2)
+
+                    # print(f"[LatentDataset] Sampling: {f_a}+{c_a}, {f_a}+{c_b}, {f_b}+{c_a}, {f_b}+{c_b}")
+
+                    k_fa_ca = self.data[f_a][c_a]
+                    k_fa_cb = self.data[f_a][c_b]
+                    k_fb_ca = self.data[f_b][c_a]
+                    k_fb_cb = self.data[f_b][c_b]
+
+                    # print(f"[LatentDataset] Keys: {k_fa_ca}, {k_fa_cb}, {k_fb_ca}, {k_fb_cb}")
+
+                    z_fa_ca = self._load_latent(txn, k_fa_ca)
+                    z_fa_cb = self._load_latent(txn, k_fa_cb)
+                    z_fb_ca = self._load_latent(txn, k_fb_ca)
+                    z_fb_cb = self._load_latent(txn, k_fb_cb)
+
+                    # print(f"[LatentDataset] Loaded latent shapes: "
+                    #       f"{z_fa_ca.shape}, {z_fa_cb.shape}, {z_fb_ca.shape}, {z_fb_cb.shape}")
+
+                    return {
+                        "F_A+C_A": z_fa_ca,
+                        "F_A+C_B": z_fa_cb,
+                        "F_B+C_A": z_fb_ca,
+                        "F_B+C_B": z_fb_cb,
+                        "font_a": f_a, "font_b": f_b,
+                        "char_a": c_a, "char_b": c_b,
+                    }
+
+                except Exception as e:
+                    print(f"[WARN] latent load fail: {e}, retry…")
+                    continue
+
+            raise RuntimeError("Unable to sample a valid 4-way latent pair after 100 attempts.")
+
+    def _load_latent(self, txn, k_bytes):
+        buf = txn.get(k_bytes)
+        arr = pickle.loads(buf)  # 变成 numpy
+        latent = torch.from_numpy(arr)  # 转回 tensor
+
+        if not isinstance(latent, torch.Tensor):
+            raise TypeError(f"Expected torch.Tensor but got {type(latent)}")
+
+        if latent.shape != self.latent_shape:
+            raise ValueError(f"Expected shape {self.latent_shape}, got {latent.shape}")
+        
+        # print(f"[LatentDataset] Loaded latent shape: {latent.shape}")
+
+        return latent
+
+
 import lmdb
 
 def get_all_fonts(lmdb_path, cache_path="font_list.json"):
@@ -244,9 +343,3 @@ def get_all_lmdb_keys(lmdb_path, cache_path="lmdb_keys.json", max_keys=None):
 
 
 
-
-if __name__ == "__main__":
-    # Example usage
-    font_list = get_all_fonts("/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_data.lmdb")
-    train_fonts = font_list[:-50]
-    val_fonts = font_list[-50:]

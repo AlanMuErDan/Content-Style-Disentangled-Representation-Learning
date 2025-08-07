@@ -1,30 +1,41 @@
 # ==============================
 # GLOBAL CONFIGURATION
 # ==============================
-train_stage: VAE           # Disentangle, VAE
+train_stage: disentangle           # Disentangle, VAE
 img_size: 128
 data_dir: ./data
 batch_size: 32
-epochs: 120
+epochs: 100
 lr: 0.0001
 checkpoint_interval: 25 #500
 in_channels: 1
 seed: 10086
 
+# Experiment & Saving
+train_stage: disentangle           # Disentangle, VAE
+experiment_name: ddpm_baseline
+seed: 10086     
+batch_size: 32
+epochs: 100
+lr: 0.0001
+ckpt_to_cpu: true          
+train_log_interval: 200 
+val_interval: 50 #5000
+
 # ==============================
 # VAE CONFIGURATION
 # ==============================
 vae:
-  # ---- Experiment & Saving ----
-  train_stage: VAE           # Disentangle, VAE
-  experiment_name: super_vae_16*16*4
-  seed: 10086     
-  batch_size: 32
-  epochs: 120
-  lr: 0.0001
-  ckpt_to_cpu: true          
-  train_log_interval: 200 
-  val_interval: 8000  #5000
+  # # ---- Experiment & Saving ----
+  # train_stage: VAE           # Disentangle, VAE
+  # experiment_name: super_vae_16*16*4
+  # seed: 10086     
+  # batch_size: 32
+  # epochs: 100
+  # lr: 0.0001
+  # ckpt_to_cpu: true          
+  # train_log_interval: 200 
+  # val_interval: 8000  #5000
 
   # ---- Data ----
   train_data_root: /scratch/rw3239/Content-Style-Disentangled-Representation-Learning/lmdb_data
@@ -71,30 +82,52 @@ vae:
 # DISENTANGLE CONFIGURATION
 # ==============================
 disentangle:
-  encoder_c: vae_encoder
-  encoder_s: vae_encoder 
-  decoder: vae_decoder
-  latent_dim: 256
-  use_gan: true
-  lpips_weight: 0.8
-  kl_weight: 0.2
-  vq_loss_weight: 1.0
-  gan_weight: 0.2
-  resume_ckpt: ""  # optional resume
-  vq_content: false
-  vq_style: false
-  vq_content_codebook_size: 512
-  vq_style_codebook_size: 256
-  img_size: 128
-  data_root: ./data
-  batch_size: 32
-  epochs: 100
-  lr: 0.0001
-  checkpoint_interval: 25 #500
-  in_channels: 1
+  seed: 10086
 
-# ==============================
-# DDPM CONFIGURATION
-# ==============================
-ddpm:
-  freeze_ckpt: checkpoints/resnet34/ckpt_epoch_99.pth
+  # -------------------------------------------------------------
+  dataset:
+    lmdb_path: "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/lmdb_latent"
+    stats_yaml: "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/configs/latent_stats.yaml"
+    font_json: "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/font_list.json"
+    train_ratio: 0.9
+    latent_size: 16          # 16×16×4 → flatten 1024
+    augment_prob: 0.0
+
+  # -------------------------------------------------------------
+  encoder:            # Residual MLP
+    input_dim: 1024
+    hidden_dim: 2048
+    num_layers: 4
+
+  denoiser:           # SimpleMLPAdaLN
+    model_channels: 2048
+    num_res_blocks: 4
+    timesteps: 1000
+    beta_start: 1e-4
+    beta_end: 2e-2
+    grad_ckpt: false
+
+  # -------------------------------------------------------------
+  train:
+    epochs: 1000
+    batch_size: 256
+    lr: 2.0e-4
+    weight_decay: 0.0
+    save_interval: 5
+    ckpt_dir: "checkpoints/ddpm_disentangle"
+
+  eval:
+    batch_size: 256
+    interval: 1        # 每 5 个 epoch 跑一次验证集
+
+  num_workers: 1
+
+  wandb:
+    enable: true
+    project: "font_disentangle_ddpm"
+    log_interval: 10
+  
+  vis:
+    enable: true           # 关闭可设 false
+    vae_config: "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/configs/config.yaml"
+    vae_ckpt: "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/checkpoints/20250723_121344_super_vae_16*16*4_seed10086/best_ckpt.pth"

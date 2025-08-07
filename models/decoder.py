@@ -95,6 +95,78 @@ def build_decoder(name: str = "diff_decoder",
 
     raise NotImplementedError(f"Decoder '{name}' is not supported.")
 
+import os
+import lmdb
+import random
+import pickle
+import torch
+from torchvision.utils import save_image
+from tqdm import tqdm
+
+def main():
+    # 配置路径
+    lmdb_path = "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/lmdb_test"
+    output_dir = "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/decoder_output"
+    checkpoint_path = "/scratch/rw3239/Content-Style-Disentangled-Representation-Learning/checkpoints/20250723_121344_super_vae_16*16*4_seed10086/best_ckpt.pth"
+
+    os.makedirs(output_dir, exist_ok=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # 打开 LMDB 环境
+    env = lmdb.open(lmdb_path, readonly=True, lock=False)
+    keys = []
+    with env.begin() as txn:
+        with txn.cursor() as cursor:
+            for key, _ in cursor:
+                keys.append(key)
+
+    # 抽取 2 个样本
+    sample_keys = random.sample(keys, 2)
+
+    # 读取 latent
+    latents = []
+    with env.begin() as txn:
+        for key in sample_keys:
+            byte_data = txn.get(key)
+            latent_array = pickle.loads(byte_data)
+            latent_tensor = torch.tensor(latent_array).to(device)
+            latents.append(latent_tensor)
+
+    latent_batch = torch.stack(latents).to(device)  # [2, 4, 16, 16]
+
+    # 初始化 decoder 并加载权重
+    decoder = FeatureMapDecoder(latent_channels=4, img_size=128).to(device)
+
+    # 加载 checkpoint
+    print(f"Loading checkpoint from: {checkpoint_path}")
+    ckpt = torch.load(checkpoint_path, map_location=device)
+
+    if "ema_decoder" in ckpt:
+        print("Using EMA decoder weights.")
+        decoder.load_state_dict(ckpt["ema_decoder"])
+    elif "decoder" in ckpt:
+        print("Using standard decoder weights.")
+        decoder.load_state_dict(ckpt["decoder"])
+    else:
+        raise KeyError("Decoder weights not found in checkpoint.")
+
+    decoder.eval()
+
+    # 解码
+    with torch.no_grad():
+        decoded_imgs = decoder(latent_batch)  # [2, 1, 128, 128]
+
+    # 保存图像
+    for i, img in enumerate(decoded_imgs):
+        print(f"[DEBUG] img.min={img.min().item():.3f}, img.max={img.max().item():.3f}")
+        save_path = os.path.join(output_dir, f"decoded_{i}.png")
+        save_image(img, save_path)
+
+    print(f"✅ Decoded images saved to: {output_dir}")
+
+if __name__ == "__main__":
+    main()
+
 
 # # 16*8*8
 # class FeatureMapDecoder(DiffusersDecoder):

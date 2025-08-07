@@ -15,7 +15,32 @@ def _patch_relu(module: nn.Module) -> None:
         else:
             _patch_relu(child)
 
+class ResNetMLP1d(nn.Module):
+    def __init__(self, input_dim=1024, hidden_dim=1024, output_dim=2048, num_layers=4):
+        super(ResNetMLP1d, self).__init__()
+        
+        self.input_proj = nn.Linear(input_dim, hidden_dim)
 
+        self.res_layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim)
+            )
+            for _ in range(num_layers)
+        ])
+
+        self.output_proj = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        x = self.input_proj(x)
+        for layer in self.res_layers:
+            residual = x
+            x = layer(x)
+            x = x + residual  # Residual connection
+        x = self.output_proj(x)
+        return x
 
 class ResNet18Encoder(nn.Module):
     def __init__(self, output_dim: int = 256):
@@ -82,6 +107,11 @@ def build_encoder(name: str = "diff_encoder",
 
     raise NotImplementedError(f"Unknown encoder: {name}")
 
+if __name__ == "__main__":
+    model = ResNetMLP1d()
+    input_tensor = torch.randn(1, 1024)  # shape: (1, 1024)
+    output_tensor = model(input_tensor)  # shape: (1, 2048)
+    print("Output shape:", output_tensor.shape)
 
 # # 16*8*8
 # class FeatureMapEncoder(DiffusersEncoder):

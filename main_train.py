@@ -1,26 +1,35 @@
-# main_train.py
-
+# main_train.py  （放在项目根目录）
+# -------------------------------------------------
+# 统一入口：根据 config["train_stage"] 选择训练脚本
+#   - "VAE"          → trainer.train_vae.train_vae_loop(cfg["vae"])
+#   - "Disentangle"  → trainer.train_disentangle.train(cfg["disentangle"])
+# -------------------------------------------------
 import yaml
-from dataset.font_dataset import FontPairDataset
-from trainer.train_disentangle import train_disentangle_loop
+
+# stage-1  (VAE)
 from trainer.train_vae import train_vae_loop
 
+# stage-2  (Disentangle + DDPM)
+import trainer.train_disentangle as _td   # 直接 import 模块
+# 兼容：如果脚本里后来改名成 train_disentangle_loop 也能用
+_train_disentangle = (
+    getattr(_td, "train_disentangle_loop", None) or getattr(_td, "train")
+)
+
 def main():
-    config = yaml.safe_load(open("configs/config.yaml"))
+    cfg = yaml.safe_load(open("configs/config.yaml", "r"))
+    stage = cfg.get("train_stage", "").strip()
 
-    if config.get("train_stage") == "Disentangle":
-        print("Disentangle VAE Training....")
-        print(f"Training config: {config['disentangle']}")
-        dataset = FontPairDataset(root_dir=config['data_dir'], img_size=config['img_size'])
-        train_disentangle_loop(config["disentangle"], dataset)
+    if stage.lower() == "vae":
+        print("=== Stage-1: VAE Training ===")
+        train_vae_loop(cfg["vae"])
 
-    elif config.get("train_stage") == "VAE": 
-        print("Disentangle VAE Training...")
-        print(f"Training config: {config['vae']}")
-        train_vae_loop(config["vae"]) 
+    elif stage.lower() == "disentangle":
+        print("=== Stage-2: Disentangle + DDPM Training ===")
+        _train_disentangle(cfg["disentangle"])
 
     else:
-        raise ValueError("`train_stage` must be either 1 or 2")
+        raise ValueError("config['train_stage'] has to be 'VAE' or 'Disentangle'")
 
 if __name__ == "__main__":
     main()
