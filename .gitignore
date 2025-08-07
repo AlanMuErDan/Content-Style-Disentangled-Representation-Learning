@@ -17,4 +17,4 @@ font_data.lmdb/
 font_latents.lmdb/ 
 font_list.json 
 lmdb_keys.json 
-font_latents_temp.lmdb 
+font_latents_temp.lmdb/

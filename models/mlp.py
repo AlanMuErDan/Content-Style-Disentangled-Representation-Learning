@@ -5,46 +5,56 @@ import torch.nn as nn
 import math
 from torch.utils.checkpoint import checkpoint
 
-# ------------------------
-# Residual MLP (basic)
-# ------------------------
+
+
 class ResidualMLP(nn.Module):
+    """
+    used for disentangle DDPM encoder
+    """
     def __init__(self, input_dim=1024, hidden_dim=2048, num_layers=4):
         super().__init__()
-        assert num_layers >= 2, "Must have at least 2 layers for residual MLP"
+        print(f"[ResidualMLP] Creating with input_dim={input_dim}, hidden_dim={hidden_dim}, num_layers={num_layers}")
+        
+        self.layers = nn.ModuleList()
+        self.gates = nn.ParameterList()
 
-        layers = []
-        in_dim = input_dim
-        for i in range(num_layers - 1):
-            layers.append(nn.Linear(in_dim, hidden_dim))
-            layers.append(nn.ReLU())
-            in_dim = hidden_dim
-        layers.append(nn.Linear(hidden_dim, hidden_dim))
+        for i in range(num_layers):
+            print(f"  - Layer {i}: Linear({hidden_dim}, {hidden_dim})")
+            self.layers.append(nn.Linear(hidden_dim, hidden_dim))
+            self.gates.append(nn.Parameter(torch.tensor(1.0)))
 
-        self.mlp = nn.Sequential(*layers)
         self.project_residual = nn.Linear(input_dim, hidden_dim) if input_dim != hidden_dim else nn.Identity()
 
     def forward(self, x):
-        residual = self.project_residual(x)
-        out = self.mlp(x)
-        return out + residual
+        x = self.project_residual(x)
+        for i, (layer, gate) in enumerate(zip(self.layers, self.gates)):
+            out = layer(x)
+            if i < len(self.layers) - 1:
+                out = torch.relu(out)
+            assert out.shape == x.shape, f"Residual shape mismatch at layer {i}: x={x.shape}, out={out.shape}"
+            x = x + gate * out
+        return x
 
-
-def build_mlp(input_dim=1024, hidden_dim=2048, num_layers=4):
-    return nn.Sequential(
-        nn.Linear(input_dim, hidden_dim),
-        nn.ReLU(),
-        *[nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU()) for _ in range(num_layers - 2)],
-        nn.Linear(hidden_dim, hidden_dim)
-    )
 
 
 def build_residual_mlp(input_dim=1024, hidden_dim=2048, num_layers=4):
     return ResidualMLP(input_dim, hidden_dim, num_layers)
 
-# ------------------------
-# Kaiming MAR MLP (AdaLN)
-# ------------------------
+def build_mlp(input_dim, hidden_dim, num_layers):
+    layers = []
+    in_dim = input_dim
+    for i in range(num_layers - 1):
+        layers.append(nn.Linear(in_dim, hidden_dim))
+        layers.append(nn.ReLU())
+        in_dim = hidden_dim
+    layers.append(nn.Linear(hidden_dim, hidden_dim))
+    return nn.Sequential(*layers)
+
+"""
+below are used from:
+https://github.com/LTH14/mar 
+"""
+
 def modulate(x, shift, scale):
     return x * (1 + scale) + shift
 
@@ -95,6 +105,7 @@ class ResBlock(nn.Module):
         h = modulate(self.in_ln(x), shift, scale)
         h = self.mlp(h)
         return x + gate * h
+
 
 
 class FinalLayer(nn.Module):

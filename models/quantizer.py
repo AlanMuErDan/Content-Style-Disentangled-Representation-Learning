@@ -1,6 +1,5 @@
 # models/quantizer.py
 
-# Updated VQ module with commitment loss
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
