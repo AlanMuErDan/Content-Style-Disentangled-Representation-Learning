@@ -82,5 +82,194 @@ def decode(
     z = latent.unsqueeze(0).to(device)           # [1,C,H,W]
     with torch.no_grad():
         recon = decoder(z).squeeze(0).cpu()      # [1,H,W]
+    # recon = (recon + 1) / 2             # [-1, 1] --> [0, 1]
     recon = torch.clamp(recon, 0, 1)
     return transforms.ToPILImage()(recon)
+
+if __name__ == "__main__":
+    import argparse, json, os, io, lmdb, pickle, random, binascii
+    import numpy as np
+    import torch
+    from torchvision import transforms
+    from torchvision.utils import save_image
+
+    parser = argparse.ArgumentParser("Single-key VAE sanity checks: latent->decode vs img->encode->decode")
+    parser.add_argument("--config", default="/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/config.yaml")
+    parser.add_argument("--ckpt", required=True, help="VAE checkpoint (.pth)")
+    parser.add_argument("--latent_lmdb", default="/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_temp.lmdb")
+    parser.add_argument("--image_lmdb",  default="/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_data.lmdb")
+    parser.add_argument("--keys_json",   default="/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/lmdb_keys.json")
+    parser.add_argument("--pick-source", choices=["latent", "image", "json", "common"], default="latent",
+                        help="从哪里挑 key：latent库 / image库 / json文件 / 二者交集")
+    parser.add_argument("--key", default=None,
+                        help="显式 key（优先）。若可打印即按 UTF-8；不行可用 --key-hex 传十六进制。")
+    parser.add_argument("--key-hex", default=None,
+                        help="显式 key 的十六进制字串（例如 464f4f2b…），与 --key 互斥。")
+    parser.add_argument("--outdir", default="vae_onekey_vis")
+    parser.add_argument("--latent-shape", nargs=3, type=int, default=[4,16,16], metavar=("C","H","W"))
+    parser.add_argument("--latent-dtype", default="float32", choices=["float16","float32","float64"])
+    parser.add_argument("--stats-yaml", default=None, help="per-channel mean/std yaml (for optional latent denorm)")
+    parser.add_argument("--denorm-latent", action="store_true", help="apply z = z*std + mean before decode (requires --stats-yaml)")
+    parser.add_argument("--use-train-normalize", action="store_true", help="apply Normalize((0.5,),(0.5,)) before encoder (if training used it)")
+    args = parser.parse_args()
+
+    os.makedirs(args.outdir, exist_ok=True)
+
+    # ---------- load VAE ----------
+    encoder, decoder, cfg, device = load_models(args.config, args.ckpt, None)
+    encoder.eval(); decoder.eval()
+
+    # ---------- helpers ----------
+    C, H, W = args.latent_shape
+    np_dtype = np.dtype(args.latent_dtype)
+
+    def robust_load_latent(raw_bytes: bytes) -> np.ndarray:
+        expect = C * H * W * np_dtype.itemsize
+        if len(raw_bytes) == expect:
+            return np.frombuffer(raw_bytes, dtype=np_dtype).reshape(C, H, W)
+        obj = None
+        try:
+            obj = torch.load(io.BytesIO(raw_bytes), map_location="cpu", weights_only=False)
+        except Exception:
+            obj = None
+        if obj is None:
+            try:
+                obj = pickle.loads(raw_bytes)
+            except Exception as e:
+                raise RuntimeError(f"Cannot decode latent: {e}")
+        if isinstance(obj, torch.Tensor):
+            arr = obj.detach().cpu().numpy()
+        elif isinstance(obj, np.ndarray):
+            arr = obj
+        else:
+            raise RuntimeError(f"Unsupported latent type: {type(obj)}")
+        if arr.size != C * H * W:
+            raise ValueError(f"Latent size {arr.shape} ≠ expected {(C, H, W)}")
+        return arr.astype(np_dtype, copy=False).reshape(C, H, W)
+
+    def list_keys(env) -> list:
+        with env.begin(buffers=True) as txn:
+            return [bytes(k) for k, _ in txn.cursor()]
+
+    def pretty_key(kb: bytes) -> str:
+        try:
+            return kb.decode("utf-8")
+        except UnicodeDecodeError:
+            return f"<bytes:{binascii.hexlify(kb).decode()[:32]}...>"
+
+    # ---------- choose key_bytes ----------
+    env_lat = lmdb.open(args.latent_lmdb, readonly=True, lock=False, readahead=False)
+    env_img = lmdb.open(args.image_lmdb,  readonly=True, lock=False, readahead=False)
+
+    if args.key is not None and args.key_hex is not None:
+        raise ValueError("Use only one of --key or --key-hex, not both.")
+
+    if args.key_hex is not None:
+        key_bytes = binascii.unhexlify(args.key_hex.strip())
+        print(f"[Key] Using HEX key: {args.key_hex}  ({pretty_key(key_bytes)})")
+    elif args.key is not None:
+        # 尝试 UTF-8，失败则尝试把它当 hex
+        try:
+            key_bytes = args.key.encode("utf-8")
+            print(f"[Key] Using UTF-8 key: {args.key}")
+        except Exception:
+            try:
+                key_bytes = binascii.unhexlify(args.key.strip())
+                print(f"[Key] Using key (auto HEX): {args.key}")
+            except Exception as e:
+                raise ValueError(f"--key neither valid UTF-8 nor HEX: {e}")
+    else:
+        # 自动挑选
+        if args.pick_source == "latent":
+            keys_lat = list_keys(env_lat)
+            if not keys_lat:
+                raise RuntimeError("No entries in latent LMDB.")
+            key_bytes = random.choice(keys_lat)
+            print(f"[Key] Picked from latent LMDB: {pretty_key(key_bytes)}")
+        elif args.pick_source == "image":
+            keys_img = list_keys(env_img)
+            if not keys_img:
+                raise RuntimeError("No entries in image LMDB.")
+            key_bytes = random.choice(keys_img)
+            print(f"[Key] Picked from image LMDB: {pretty_key(key_bytes)}")
+        elif args.pick_source == "json":
+            with open(args.keys_json, "r", encoding="utf-8") as f:
+                keys = json.load(f)
+            if not keys:
+                raise RuntimeError(f"No keys in {args.keys_json}")
+            key_bytes = random.choice(keys).encode("utf-8", errors="ignore")
+            print(f"[Key] Picked from JSON: {pretty_key(key_bytes)}")
+        else:  # "common"
+            keys_lat = set(list_keys(env_lat))
+            keys_img = set(list_keys(env_img))
+            common = list(keys_lat & keys_img)
+            if not common:
+                raise RuntimeError("No common keys between image and latent LMDBs.")
+            key_bytes = random.choice(common)
+            print(f"[Key] Picked from COMMON: {pretty_key(key_bytes)}")
+
+    # ---------- optional stats for denorm ----------
+    mean = std = None
+    if args.denorm_latent:
+        if not args.stats_yaml:
+            raise ValueError("--denorm-latent requires --stats-yaml")
+        with open(args.stats_yaml, "r") as f:
+            stats = yaml.safe_load(f)
+        mean = torch.tensor(stats["mean"]).view(C, 1, 1)
+        std  = torch.tensor(stats["std"]).view(C, 1, 1)
+        print(f"[Stats] mean={stats['mean']}, std={stats['std']}")
+
+    # ---------- A) latent -> decode ----------
+    with env_lat.begin(buffers=True) as txn:
+        raw = txn.get(key_bytes)
+        if raw is None:
+            raise KeyError(f"Key not found in latent LMDB: {pretty_key(key_bytes)}")
+        arr = robust_load_latent(bytes(raw))         # (C,H,W) numpy
+        z = torch.from_numpy(arr).float()            # float32 for decoder
+        if args.denorm_latent:
+            z = (z * std) + mean                     # [C,H,W]
+        img_latent_decode = decode(z, decoder, cfg, device)  # PIL
+        path_latent = os.path.join(args.outdir, "A_latent_decode.png")
+        os.makedirs(args.outdir, exist_ok=True)
+        img_latent_decode.save(path_latent)
+        print(f"[Saved] {path_latent}")
+
+    # ---------- B) image -> encode -> decode ----------
+    with env_img.begin(buffers=True) as txn:
+        raw = txn.get(key_bytes)
+        if raw is None:
+            raise KeyError(f"Key not found in image LMDB: {pretty_key(key_bytes)}")
+        pil = Image.open(io.BytesIO(bytes(raw))).convert("L")
+
+    img_size = cfg["img_size"]
+    if args.use_train_normalize:
+        preprocess = transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),                  # [0,1]
+            transforms.Normalize((0.5,), (0.5,)),   # → [-1,1]
+        ])
+    else:
+        preprocess = transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),                  # [0,1]
+        ])
+
+    x = preprocess(pil).unsqueeze(0).to(device)     # [1,1,H,W]
+    with torch.no_grad():
+        enc_out = encoder(x)
+        mu = enc_out[0] if (isinstance(enc_out, (tuple, list)) and len(enc_out) >= 1) else enc_out
+        recon = decoder(mu).squeeze(0).cpu().clamp(0, 1)  # [1,H,W]
+
+    orig = transforms.ToTensor()(pil.resize((img_size, img_size)))  # [1,H,W], [0,1]
+    cat = torch.cat([orig, recon], dim=-1)  # 横向拼
+    path_pair  = os.path.join(args.outdir, "B_img_encode_decode_pair.png")
+    path_orig  = os.path.join(args.outdir, "B_orig.png")
+    path_recon = os.path.join(args.outdir, "B_recon.png")
+    save_image(cat, path_pair)
+    transforms.ToPILImage()(orig ).save(path_orig)
+    transforms.ToPILImage()(recon).save(path_recon)
+    print(f"[Saved] {path_pair}")
+    print(f"[Saved] {path_orig}")
+    print(f"[Saved] {path_recon}")
+
+    print("\nDone. 若 A 有阴影而 B 正常，多半是 latent 需要反标准化（试试 --denorm-latent --stats-yaml）。")

@@ -18,3 +18,8 @@ font_latents.lmdb/
 font_list.json 
 lmdb_keys.json 
 font_latents_temp.lmdb/
+font_latents_v2_shards/
+font_latents_v2_temp.lmdb/
+font_latents_v2.lmdb/
+font_latents_v2_temp.pt
+font_latents_v2.pt
