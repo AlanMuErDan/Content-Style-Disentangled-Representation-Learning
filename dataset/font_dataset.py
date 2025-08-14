@@ -18,6 +18,7 @@ import yaml
 from pathlib import Path
 import math 
 import lmdb
+import time 
 
 
 
@@ -28,9 +29,6 @@ def _open_lmdb(path: str) -> lmdb.Environment:
         readonly=True, lock=False, readahead=False,
         meminit=False, max_readers=2048
     )
-
-def latent_worker_init(worker_id: int):
-    FourWayFontPairLatentLMDBDataset._ENV = None
 
 
 
@@ -155,107 +153,153 @@ class SingleFontLMDBDataset(Dataset):
 
 
 
-class FourWayFontPairLatentLMDBDataset(Dataset):
-    """
-    Used for stage 2 disentangle DDPM training
-    """
+class FourWayFontPairLatentPTDataset(Dataset):
     def __init__(self,
-                 lmdb_path: str,
+                 pt_path: str,
+                 chars_path: str,
+                 fonts_json: str,
                  latent_shape: Tuple[int, int, int] = (4, 16, 16),
                  max_retry: int = 1000,
                  pair_num: int = 1000,
-                 stats_yaml: str = None):
+                 stats_yaml: Optional[str] = None):
+        super().__init__()
 
-        self.env = lmdb.open(lmdb_path, readonly=True, lock=False, readahead=False)
-        self.latent_shape = latent_shape
-        self.max_retry = max_retry       # max number of trial to get the paired data 
-        self.pair_num = pair_num         # total number of pairs in the dataset 
-        self.data = {}                   # font: {char: bytes_key}
-        with self.env.begin() as txn:
-            for k_bytes, _ in tqdm(txn.cursor(), desc="Scanning latent LMDB keys", unit="key"):
-                try:
-                    k_str = k_bytes.decode("utf-8")
-                    font, char = k_str.split("+", 1)
-                    self.data.setdefault(font, {})[char] = k_bytes
-                except Exception:
-                    continue
-        self.fonts = list(self.data.keys())
-        self.common_chars = list(
-            set.intersection(*(set(chars.keys()) for chars in self.data.values()))
-        )
+        blob = torch.load(pt_path, map_location="cpu") # load latents tensor to CPU 
+        if isinstance(blob, dict) and "latents" in blob:
+            latents = blob["latents"]
+        else:
+            latents = blob  # allow raw tensor
+        if not isinstance(latents, torch.Tensor):
+            raise TypeError(f"Expected torch.Tensor, got {type(latents)}")
+        if latents.dim() != 4:
+            raise ValueError(f"Expected latents.dim()==4, got shape {tuple(latents.shape)}")
 
-        print(f"Found {len(self.fonts)} fonts and {len(self.common_chars)} common chars.")
-        assert len(self.fonts) >= 2 and len(self.common_chars) >= 2, \
-            "Too few fonts or shared characters in latent LMDB"
+        self.latents_hwc = latents.contiguous()  # (N, H, W, C)
+        N, H, W, C = self.latents_hwc.shape
 
-        if stats_yaml:   
-            """
-            mean: [-0.5021770477, 0.9270092909, 0.6116915592, 0.4392606947]
-            std:  [0.2178721980, 0.1884942846, 0.1611157692, 0.6110689706]
-            """
+        # load chars 
+        self.chars = [] 
+        seen = set()
+        with open(chars_path, "r", encoding="utf-8") as f:
+            for line in f:
+                ch = line.strip()
+                if ch and (ch not in seen):
+                    seen.add(ch)
+                    self.chars.append(ch)
+        self.m = len(self.chars)
+        if self.m <= 1:
+            raise ValueError(f"Need at least 2 chars, got m={self.m}")
+
+        # load fonts 
+        with open(fonts_json, "r", encoding="utf-8") as f:
+            self.fonts = json.load(f)
+        self.n = len(self.fonts)
+        if self.n <= 1:
+            raise ValueError(f"Need at least 2 fonts, got n={self.n}")
+
+        # sanity check 
+        if N != self.m * self.n:
+            raise ValueError(f"PT size mismatch: N={N} but m*n={self.m*self.n} (m={self.m}, n={self.n})")
+
+        # stats for normalization 
+        if stats_yaml:
             with open(stats_yaml, "r") as f:
                 stats = yaml.safe_load(f)
-            self.mean = torch.tensor(stats["mean"]).view(-1,1,1)
-            self.std  = torch.tensor(stats["std"]).view(-1,1,1)
+            self.mean = torch.tensor(stats["mean"]).view(-1, 1, 1)  # (C,1,1)
+            self.std  = torch.tensor(stats["std"]).view(-1, 1, 1)
         else:
             self.mean = self.std = None
 
+        self.latent_shape = latent_shape
+        if (latent_shape[1], latent_shape[2], latent_shape[0]) != (H, W, C):
+            if (H, W, C) != (latent_shape[1], latent_shape[2], latent_shape[0]):
+                raise ValueError(
+                    f"Shape mismatch: loaded HWC={(H,W,C)} incompatible with expected CHW={latent_shape}"
+                )
+
+        self.data: Dict[str, Dict[str, int]] = {}
+        for fi, font in enumerate(self.fonts):
+            inner = {}
+            for ci, ch in enumerate(self.chars):
+                inner[ch] = self._flat_index(fi, ci)
+            self.data[font] = inner
+
+        self.common_chars = list(self.chars)  
+        self._active_font_indices = list(range(self.n))
+
+        self.max_retry = max_retry
+        self.pair_num = pair_num
+
+        print(f"[PTDataset] Loaded latents from {pt_path} with shape {tuple(self.latents_hwc.shape)}")
+        print(f"[PTDataset] m(chars)={self.m}, n(fonts)={self.n} | total={self.m*self.n}")
+
     def __len__(self):
-        return int(self.pair_num)  # decide as you wish 
+        return int(self.pair_num)
 
     def __getitem__(self, idx):
-        with self.env.begin() as txn:
-            for _ in range(self.max_retry):
-                try:
-                    f_a, f_b = random.sample(self.fonts, 2)        # sampling 2 fonts 
-                    c_a, c_b = random.sample(self.common_chars, 2) # sampling 2 characters 
+        if len(self._active_font_indices) < 2 or len(self.common_chars) < 2:
+            raise RuntimeError("Not enough fonts or chars to sample a 4-way pair.")
 
-                    k_fa_ca = self.data[f_a][c_a]
-                    k_fa_cb = self.data[f_a][c_b]
-                    k_fb_ca = self.data[f_b][c_a]
-                    k_fb_cb = self.data[f_b][c_b]
+        for _ in range(self.max_retry):
+            fi_a, fi_b = random.sample(self._active_font_indices, 2)
+            ci_a, ci_b = random.sample(range(self.m), 2)
 
-                    z_fa_ca = self._load_latent(txn, k_fa_ca)
-                    z_fa_cb = self._load_latent(txn, k_fa_cb)
-                    z_fb_ca = self._load_latent(txn, k_fb_ca)
-                    z_fb_cb = self._load_latent(txn, k_fb_cb)
+            # compute flat indices
+            idx_fa_ca = self._flat_index(fi_a, ci_a)
+            idx_fa_cb = self._flat_index(fi_a, ci_b)
+            idx_fb_ca = self._flat_index(fi_b, ci_a)
+            idx_fb_cb = self._flat_index(fi_b, ci_b)
 
-                    return {
-                        "F_A+C_A": z_fa_ca,
-                        "F_A+C_B": z_fa_cb,
-                        "F_B+C_A": z_fb_ca,
-                        "F_B+C_B": z_fb_cb,
-                        "font_a": f_a, "font_b": f_b,
-                        "char_a": c_a, "char_b": c_b,
-                    }
+            # slice and convert to (C,H,W)
+            z_fa_ca = self._get_chw(idx_fa_ca)
+            z_fa_cb = self._get_chw(idx_fa_cb)
+            z_fb_ca = self._get_chw(idx_fb_ca)
+            z_fb_cb = self._get_chw(idx_fb_cb)
 
-                except Exception as e:
-                    print(f"latent load fail: {e}, retry…")
-                    continue
+            # normalization 
+            if self.mean is not None:
+                z_fa_ca = (z_fa_ca - self.mean) / self.std
+                z_fa_cb = (z_fa_cb - self.mean) / self.std
+                z_fb_ca = (z_fb_ca - self.mean) / self.std
+                z_fb_cb = (z_fb_cb - self.mean) / self.std
 
-            raise RuntimeError("Unable to sample a valid 4-way latent pair after 100 attempts.")
+            return {
+                "F_A+C_A": z_fa_ca,
+                "F_A+C_B": z_fa_cb,
+                "F_B+C_A": z_fb_ca,
+                "F_B+C_B": z_fb_cb,
+                "font_a": self.fonts[fi_a],
+                "font_b": self.fonts[fi_b],
+                "char_a": self.chars[ci_a],
+                "char_b": self.chars[ci_b],
+            }
 
-    def _load_latent(self, txn, k_bytes):
-        buf = txn.get(k_bytes)
-        arr = pickle.loads(buf)         # to numpy array 
-        latent = torch.from_numpy(arr)  # to tensor 
+        raise RuntimeError("Unable to sample a valid 4-way latent pair after max_retry attempts.")
 
-        if not isinstance(latent, torch.Tensor):
-            raise TypeError(f"Expected torch.Tensor but got {type(latent)}")
+    def _flat_index(self, font_idx: int, char_idx: int) -> int:
+        return font_idx * self.m + char_idx
 
-        if latent.shape != self.latent_shape:
-            raise ValueError(f"Expected shape {self.latent_shape}, got {latent.shape}")
+    def _get_chw(self, flat_idx: int) -> torch.Tensor:
+        z_hwc = self.latents_hwc[flat_idx]  # (H,W,C)
+        z_chw = z_hwc.permute(2, 0, 1).contiguous()  # (C,H,W)
+        # sanity check
+        if tuple(z_chw.shape) != self.latent_shape:
+            z_chw = z_chw.view(*self.latent_shape)
+        return z_chw
 
-        if self.mean is not None:
-            latent = (latent - self.mean) / self.std     # normalization 
-
-        return latent
-    
     def denorm(self, z: torch.Tensor) -> torch.Tensor:
-        if self.mean is None:         
+        if self.mean is None:
             return z
         return z * self.std.to(z.device) + self.mean.to(z.device)
 
+    @property
+    def fonts_count(self) -> int:
+        return len(self._active_font_indices)
+
+    def apply_font_filter(self, allowed_fonts: set):
+        """Optionally restrict the active font subset to allowed_fonts."""
+        self._active_font_indices = [i for i, f in enumerate(self.fonts) if f in allowed_fonts]
+        assert len(self._active_font_indices) > 1, "Filtered dataset not enough fonts"
 
 
 
@@ -271,7 +315,13 @@ def split_fonts(json_path: str,
     valid_fonts = set(fonts[n_train:])
     return train_fonts, valid_fonts
 
-def filter_dataset_fonts(ds: FourWayFontPairLatentLMDBDataset, allowed_fonts: set) -> None:
+def filter_dataset_fonts(ds, allowed_fonts: set) -> None:
+    # PT path (preferred, keeps internal _active_font_indices in sync)
+    if hasattr(ds, "apply_font_filter") and callable(getattr(ds, "apply_font_filter")):
+        ds.apply_font_filter(allowed_fonts)
+        return
+
+    # LMDB path (original behavior)
     ds.fonts = [f for f in ds.fonts if f in allowed_fonts]
     assert len(ds.fonts) > 1, "Filtered dataset not enough fonts"
 
@@ -279,30 +329,3 @@ def filter_dataset_fonts(ds: FourWayFontPairLatentLMDBDataset, allowed_fonts: se
         set.intersection(*(set(ds.data[f].keys()) for f in ds.fonts))
     )
     assert len(ds.common_chars) >= 2, "not enough characters after filtering"
-
-
-if __name__ == "__main__":
-    lmdb_path = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_temp.lmdb"
-    CONFIG_PATH = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/config.yaml"
-    CKPT_PATH   = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/vae_best_ckpt.pth"
-
-    dataset = FourWayFontPairLatentLMDBDataset(lmdb_path)
-
-    print(f"Dataset size (mock): {len(dataset)}")
-
-    sample = dataset[0]
-    for k, v in sample.items():
-        if isinstance(v, torch.Tensor):
-            print(f"{k} → {v.shape}")
-        else:
-            print(f"{k} → {v}")
-    
-    from utils.vae_io import load_models, decode as vae_decode
-
-    encoder, decoder, cfg, device = load_models(CONFIG_PATH, CKPT_PATH)
-    sample = dataset[0]                      # sample one latent 
-    latent  = sample["F_A+C_A"]              
-    recon_img = vae_decode(latent, decoder, cfg, device)  # decode 
-    recon_img.save("recon_check.png")                  
-
-    print("Decoded image saved to recon_check.png")

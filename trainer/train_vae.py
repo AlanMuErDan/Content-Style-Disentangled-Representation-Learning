@@ -228,10 +228,10 @@ def train_vae_loop(config):
             else:
                 d_loss = torch.tensor(0.0, device=device)
 
-            print("decoder.conv_in.weight.shape:", decoder.conv_in.weight.shape)
-            print("z.shape before decoder:", z.shape)
+            # print("decoder.conv_in.weight.shape:", decoder.conv_in.weight.shape)
+            # print("z.shape before decoder:", z.shape)
             rec = decoder(z)
-            print(f"Reconstruction shape: {rec.shape}, Original shape: {img.shape}")
+            # print(f"Reconstruction shape: {rec.shape}, Original shape: {img.shape}")
             recon_l2 = reconstruction_loss(rec, img)
             lpips_l = lpips_loss_fn(lpips_model, [rec], [img])
             kl_l = 0.5 * torch.sum(mu**2 + logvar.exp() - logvar - 1) / mu.numel()

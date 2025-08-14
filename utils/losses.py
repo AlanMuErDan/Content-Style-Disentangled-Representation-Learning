@@ -43,7 +43,7 @@ class GANLossModule(nn.Module):
             real_pred = self.disc(real_img)
             fake_pred = self.disc(fake_img)
 
-            print(f"GAN Disc: Real pred shape: {real_pred.shape}, Fake pred shape: {fake_pred.shape}")
+            # print(f"GAN Disc: Real pred shape: {real_pred.shape}, Fake pred shape: {fake_pred.shape}")
 
             if self.gan_type == "hinge":
                 loss_gan = torch.relu(1.0 - real_pred.view(-1)).mean() + torch.relu(1.0 + fake_pred.view(-1)).mean()

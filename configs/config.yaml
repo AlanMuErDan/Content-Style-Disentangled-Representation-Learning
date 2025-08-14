@@ -72,7 +72,8 @@ disentangle:
   seed: 10086
 
   dataset:
-    lmdb_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents.lmdb"
+    pt_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_v2.pt"
+    chars_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/intersection_chars.txt"
     stats_yaml: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/latent_stats.yaml"
     font_json: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_list.json"
     train_ratio: 0.9
@@ -94,11 +95,11 @@ disentangle:
     grad_ckpt: false
 
   train:
-    epochs: 1000
+    epochs: 10000
     batch_size: 256
     lr: 2.0e-4
     weight_decay: 0.0
-    save_interval: 5
+    save_interval: 500
     ckpt_dir: "checkpoints/ddpm_disentangle"
 
   eval:

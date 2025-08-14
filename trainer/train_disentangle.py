@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 from torchvision.utils import make_grid
 from torchvision import transforms
 
-from dataset.font_dataset import FourWayFontPairLatentLMDBDataset, latent_worker_init, split_fonts, filter_dataset_fonts
+from dataset.font_dataset import FourWayFontPairLatentPTDataset, split_fonts, filter_dataset_fonts
 
 from models.mlp import build_residual_mlp, SimpleMLPAdaLN 
 from models.DDPM import GaussianDiffusion as DDPMNoiseScheduler
@@ -44,7 +44,6 @@ def build_content_style_encoder(cfg: dict) -> nn.Module:
 
 
 def build_dataloaders(cfg: dict) -> Tuple[DataLoader, DataLoader]:
-    lmdb_path = cfg["dataset"]["lmdb_path"]
     font_json = cfg["dataset"]["font_json"]
 
     train_fonts, valid_fonts = split_fonts(
@@ -59,16 +58,34 @@ def build_dataloaders(cfg: dict) -> Tuple[DataLoader, DataLoader]:
     latent_channels = cfg["dataset"].get("latent_channels", 4)
     latent_shape = (latent_channels, latent_size, latent_size)
 
-    ds_train = FourWayFontPairLatentLMDBDataset(
-        lmdb_path=lmdb_path,
-        latent_shape=latent_shape,
-        pair_num=10000,
+    # ds_train = FourWayFontPairLatentLMDBDataset(
+    #     lmdb_path=lmdb_path,
+    #     latent_shape=latent_shape,
+    #     pair_num=10000,
+    #     stats_yaml=cfg["dataset"].get("stats_yaml", None)
+    # )
+
+    ds_train = FourWayFontPairLatentPTDataset(
+        pt_path = cfg["dataset"].get("pt_path"),
+        chars_path = cfg["dataset"].get("chars_path"),
+        fonts_json = cfg["dataset"].get("font_json"),
+        latent_shape = latent_shape,
+        pair_num=100000,
         stats_yaml=cfg["dataset"].get("stats_yaml", None)
     )
 
-    ds_valid = FourWayFontPairLatentLMDBDataset(
-        lmdb_path=lmdb_path,
-        latent_shape=latent_shape,
+    # ds_valid = FourWayFontPairLatentLMDBDataset(
+    #     lmdb_path=lmdb_path,
+    #     latent_shape=latent_shape,
+    #     pair_num=1000,
+    #     stats_yaml=cfg["dataset"].get("stats_yaml", None)
+    # )
+
+    ds_valid = FourWayFontPairLatentPTDataset(
+        pt_path = cfg["dataset"].get("pt_path"),
+        chars_path = cfg["dataset"].get("chars_path"),
+        fonts_json = cfg["dataset"].get("font_json"),
+        latent_shape = latent_shape,
         pair_num=1000,
         stats_yaml=cfg["dataset"].get("stats_yaml", None)
     )
@@ -86,8 +103,7 @@ def build_dataloaders(cfg: dict) -> Tuple[DataLoader, DataLoader]:
         num_workers=cfg.get("num_workers", 4),
         pin_memory=True,
         drop_last=True,
-        persistent_workers=True,
-        worker_init_fn=latent_worker_init,  
+        persistent_workers=True
     )
     dl_valid = DataLoader(
         ds_valid,
@@ -96,8 +112,7 @@ def build_dataloaders(cfg: dict) -> Tuple[DataLoader, DataLoader]:
         num_workers=cfg.get("num_workers", 4),
         pin_memory=True, 
         drop_last=False,
-        persistent_workers=True,
-        worker_init_fn=latent_worker_init, 
+        persistent_workers=True
     )
     
     return dl_train, dl_valid, ds_train.denorm
