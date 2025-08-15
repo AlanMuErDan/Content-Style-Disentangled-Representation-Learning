@@ -33,11 +33,21 @@ class GaussianDiffusion(nn.Module):
         beta_schedule: str = "linear",
         beta_start: float = 1e-4,
         beta_end: float = 2e-2,
-        device = torch.device("cpu")
+        device = torch.device("cpu"),
+        t_sampler: str = "uniform",      # ["uniform", "lognormal"]
+        t_log_mean: float = -0.5,        # lognormal  μ（
+        t_log_sigma: float = 1.0,        # σ
+        t_mix_uniform_p: float = 0.05,   
+        t_clip_quantile: float = 0.999,  
     ):
         super().__init__()
         self.timesteps = timesteps
         self.device = torch.device(device) if device is not None else None
+        self.t_sampler = t_sampler
+        self.t_log_mean = float(t_log_mean)
+        self.t_log_sigma = float(t_log_sigma)
+        self.t_mix_uniform_p = float(t_mix_uniform_p)
+        self.t_clip_quantile = float(t_clip_quantile)
 
         if beta_schedule == "linear":
             betas = linear_beta_schedule(timesteps, beta_start, beta_end)
@@ -74,8 +84,28 @@ class GaussianDiffusion(nn.Module):
         out = arr.gather(0, t.to(arr.device)).view(B, *([1] * (len(x_shape) - 1)))
         return out
 
-    def sample_timesteps(self, B):
-        return torch.randint(0, self.timesteps, (B,), device=self.betas.device, dtype=torch.long)
+    def sample_timesteps(self, B: int):
+        if self.t_sampler == "uniform":
+            return torch.randint(0, self.timesteps, (B,), device=self.betas.device, dtype=torch.long)
+
+        if self.t_sampler == "lognormal":
+            dist = torch.distributions.LogNormal(
+                torch.tensor(self.t_log_mean, device=self.betas.device),
+                torch.tensor(self.t_log_sigma, device=self.betas.device)
+            )
+            y = dist.sample((B,))  
+            q = dist.icdf(torch.tensor(self.t_clip_quantile, device=self.betas.device))
+            s = (y / (q + 1e-12)).clamp(0.0, 1.0)  # s in [0,1]
+            t_ln = (s * (self.timesteps - 1)).floor().long()
+
+            if self.t_mix_uniform_p > 0:
+                t_unif = torch.randint(0, self.timesteps, (B,), device=self.betas.device, dtype=torch.long)
+                mask = (torch.rand(B, device=self.betas.device) < self.t_mix_uniform_p)
+                t_ln = torch.where(mask, t_unif, t_ln)
+
+            return t_ln
+
+        raise ValueError(f"Unknown t_sampler {self.t_sampler}")
 
     # forward diffusion q(x_t | x_0)
     def q_sample(self, x_start, t, noise=None):

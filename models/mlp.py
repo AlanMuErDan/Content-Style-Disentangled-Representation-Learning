@@ -11,17 +11,22 @@ class ResidualMLP(nn.Module):
     """
     used for disentangle DDPM encoder
     """
-    def __init__(self, input_dim=1024, hidden_dim=2048, num_layers=4):
+    def __init__(self, input_dim=1024, hidden_dim=2048, num_layers=4, dropout=0.1, use_layernorm=True):
         super().__init__()
-        print(f"[ResidualMLP] Creating with input_dim={input_dim}, hidden_dim={hidden_dim}, num_layers={num_layers}")
+        print(f"[ResidualMLP] Creating with input_dim={input_dim}, hidden_dim={hidden_dim}, num_layers={num_layers}, "
+              f"dropout={dropout}, layernorm={use_layernorm}")
         
         self.layers = nn.ModuleList()
+        self.norms = nn.ModuleList() if use_layernorm else None
         self.gates = nn.ParameterList()
+        self.use_layernorm = use_layernorm
+        self.dropout = nn.Dropout(dropout) if dropout and dropout > 0 else nn.Identity()
 
         for i in range(num_layers):
-            print(f"  - Layer {i}: Linear({hidden_dim}, {hidden_dim})")
             self.layers.append(nn.Linear(hidden_dim, hidden_dim))
             self.gates.append(nn.Parameter(torch.tensor(1.0)))
+            if use_layernorm:
+                self.norms.append(nn.LayerNorm(hidden_dim))
 
         self.project_residual = nn.Linear(input_dim, hidden_dim) if input_dim != hidden_dim else nn.Identity()
 
@@ -30,15 +35,25 @@ class ResidualMLP(nn.Module):
         for i, (layer, gate) in enumerate(zip(self.layers, self.gates)):
             out = layer(x)
             if i < len(self.layers) - 1:
+                if self.use_layernorm:
+                    out = self.norms[i](out)
                 out = torch.relu(out)
+                out = self.dropout(out)
             assert out.shape == x.shape, f"Residual shape mismatch at layer {i}: x={x.shape}, out={out.shape}"
             x = x + gate * out
         return x
 
 
 
-def build_residual_mlp(input_dim=1024, hidden_dim=2048, num_layers=4):
-    return ResidualMLP(input_dim, hidden_dim, num_layers)
+def build_residual_mlp(input_dim=1024, hidden_dim=2048, num_layers=4,
+                       dropout=0.1, use_layernorm=True):
+    return ResidualMLP(
+        input_dim=input_dim,
+        hidden_dim=hidden_dim,
+        num_layers=num_layers,
+        dropout=dropout,
+        use_layernorm=use_layernorm,
+    )
 
 def build_mlp(input_dim, hidden_dim, num_layers):
     layers = []
