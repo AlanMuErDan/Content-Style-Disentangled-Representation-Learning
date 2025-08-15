@@ -15,6 +15,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, optim
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import LambdaLR
 from torchvision.utils import make_grid
 from torchvision import transforms
 
@@ -25,6 +26,11 @@ from models.DDPM import GaussianDiffusion as DDPMNoiseScheduler
 
 from utils.logger import init_wandb, log_losses
 from utils.vae_io import load_models, decode as vae_decode
+from utils.lr_scheduler import (
+    Scheduler_LinearWarmup,
+    Scheduler_LinearWarmup_CosineDecay,
+)
+from utils.ema import LitEma
 
 def load_config(cfg_path: str) -> dict:
     if not os.path.isfile(cfg_path):
@@ -134,7 +140,14 @@ def train_disentangle_loop(cfg: dict):
 
     dl_train, dl_valid, denorm = build_dataloaders(cfg)
 
-    encoder = build_content_style_encoder(cfg["encoder"]).to(device)
+    encoder_cfg = cfg["encoder"]
+    encoder = build_residual_mlp(
+        input_dim=encoder_cfg.get("input_dim", 1024),
+        hidden_dim=encoder_cfg.get("hidden_dim", 2048),
+        num_layers=encoder_cfg.get("num_layers", 4),
+        dropout=encoder_cfg.get("dropout", 0.1),
+        use_layernorm=encoder_cfg.get("layernorm", True)
+    ).to(device)
     print(f"Encoder: {encoder}")
 
     denoiser = SimpleMLPAdaLN(
@@ -154,12 +167,51 @@ def train_disentangle_loop(cfg: dict):
         weight_decay=cfg["train"].get("weight_decay", 0.0),
     )
 
+    # LR Scheduler
+    scheduler_cfg  = cfg["train"].get("scheduler", {})
+    sched_type     = str(scheduler_cfg.get("type", "none")).lower()
+    base_lr        = float(cfg["train"]["lr"])
+    min_lr         = float(scheduler_cfg.get("min_lr", 0.0))
+    warmup_epochs  = int(scheduler_cfg.get("warmup_epochs", 0))
+
+    step_per_epoch = len(dl_train)
+    total_steps    = step_per_epoch * cfg["train"]["epochs"]
+    warmup_steps   = warmup_epochs * step_per_epoch
+    min_ratio      = (min_lr / base_lr) if base_lr > 0 else 0.0
+
+    if sched_type == "linear-warmup":
+        lr_lambda = Scheduler_LinearWarmup(warmup_steps)
+    elif sched_type == "linear-warmup_cosine-decay":
+        lr_lambda = Scheduler_LinearWarmup_CosineDecay(warmup_steps, total_steps, min_ratio)
+    else:  # "none"
+        lr_lambda = lambda step: 1.0
+
+    lr_scheduler = LambdaLR(opt, lr_lambda)
+
+    # EMA
+    ema_cfg     = cfg["train"].get("ema", {})
+    use_ema     = bool(ema_cfg.get("enable", False))
+    ema_decay   = float(ema_cfg.get("decay", 0.9999))
+
+    if use_ema:
+        ema_encoder  = LitEma(encoder,  decay=ema_decay)
+        ema_denoiser = LitEma(denoiser, decay=ema_decay)
+    else:
+        ema_encoder = None
+        ema_denoiser = None 
+
+    sampler_cfg = cfg["denoiser"].get("timestep_sampler", {})
     scheduler = DDPMNoiseScheduler(
         timesteps   = cfg["denoiser"].get("timesteps", 1000),
         beta_start  = float(cfg["denoiser"].get("beta_start", 1e-4)),
         beta_end    = float(cfg["denoiser"].get("beta_end",  2e-2)),
         beta_schedule = cfg["denoiser"].get("beta_schedule", "linear"),
         device=device,
+        t_sampler       = sampler_cfg.get("type", "uniform"),
+        t_log_mean      = float(sampler_cfg.get("log_mean", -0.5)),
+        t_log_sigma     = float(sampler_cfg.get("log_sigma", 1.0)),
+        t_mix_uniform_p = float(sampler_cfg.get("mix_uniform_p", 0.05)),
+        t_clip_quantile = float(sampler_cfg.get("clip_quantile", 0.999)),
     ).to(device)
 
     if cfg.get("wandb", {}).get("enable", False):
@@ -207,38 +259,81 @@ def train_disentangle_loop(cfg: dict):
 
             opt.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(list(encoder.parameters()) +
-                                           list(denoiser.parameters()),
-                                           max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(
+                list(encoder.parameters()) + list(denoiser.parameters()),
+                max_norm=1.0
+            )
             opt.step()
-
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+            lr_scheduler.step()
+            if use_ema:
+                ema_encoder(encoder)
+                ema_denoiser(denoiser)
+            
             if cfg.get("wandb", {}).get("enable", False) and step % cfg["wandb"].get("log_interval", 50) == 0:
                 log_losses(step=step, loss_dict={"train/loss": loss.item()})
+                try:
+                    wandb.log({"lr": lr_scheduler.get_last_lr()[0]}, step=step)
+                except Exception:
+                    pass
+
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
             step += 1
         
         if cfg["wandb"]["enable"] and cfg["vis"]["enable"]:  # Log one batch from training set
+            if use_ema:
+                ema_encoder.store(encoder.parameters())
+                ema_denoiser.store(denoiser.parameters())
+                ema_encoder.copy_to(encoder)
+                ema_denoiser.copy_to(denoiser)
+
             train_batch = next(iter(dl_train))
             log_sample_images(step, train_batch,
                             encoder, denoiser, scheduler,
                             decoder_vae, vae_cfg, denorm,
                             device, name="train/quad_grid")
+            
+            if use_ema:
+                ema_encoder.restore(encoder.parameters())
+                ema_denoiser.restore(denoiser.parameters())
 
         if (epoch + 1) % cfg["eval"]["interval"] == 0:
+            if use_ema:
+                ema_encoder.store(encoder.parameters())
+                ema_denoiser.store(denoiser.parameters())
+                ema_encoder.copy_to(encoder)
+                ema_denoiser.copy_to(denoiser)
+
             val_loss, vis_batch = evaluate(dl_valid, encoder, denoiser, scheduler, device)
+
+            if use_ema:
+                ema_encoder.restore(encoder.parameters())
+                ema_denoiser.restore(denoiser.parameters())
 
             if cfg["wandb"]["enable"]:
                 log_losses(step=step, loss_dict={"valid/loss": val_loss})
 
                 if cfg["vis"]["enable"]:
+                    if use_ema:
+                        ema_encoder.store(encoder.parameters())
+                        ema_denoiser.store(denoiser.parameters())
+                        ema_encoder.copy_to(encoder)
+                        ema_denoiser.copy_to(denoiser)
+
                     log_sample_images(step, vis_batch,
                                     encoder, denoiser, scheduler,
                                     decoder_vae, vae_cfg, denorm,
                                     device, name="val/quad_grid")
+                    
+                    if use_ema:
+                        ema_encoder.restore(encoder.parameters())
+                        ema_denoiser.restore(denoiser.parameters())
             
 
         if (epoch + 1) % cfg["train"]["save_interval"] == 0:
-            save_ckpt(cfg, epoch, encoder, denoiser, opt)
+            save_ckpt(cfg, epoch, encoder, denoiser, opt,
+                    ema_encoder=ema_encoder if use_ema else None,
+                    ema_denoiser=ema_denoiser if use_ema else None,
+                    lr_scheduler=lr_scheduler)
 
 
 
@@ -330,7 +425,10 @@ def log_sample_images(step, batch, encoder, denoiser, scheduler,
 def save_ckpt(cfg: dict, epoch: int,
               encoder: nn.Module,
               denoiser: nn.Module,
-              optimizer: optim.Optimizer) -> None:
+              optimizer: optim.Optimizer,
+              ema_encoder=None,
+              ema_denoiser=None,
+              lr_scheduler=None) -> None:
     ckpt_dir = Path(cfg["train"]["ckpt_dir"])
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = ckpt_dir / f"epoch_{epoch:04d}.pth"
@@ -340,6 +438,12 @@ def save_ckpt(cfg: dict, epoch: int,
         "denoiser": denoiser.state_dict(),
         "optimizer": optimizer.state_dict(),
     }
+    if ema_encoder is not None:
+        ckpt["ema_encoder"] = ema_encoder.state_dict()
+    if ema_denoiser is not None:
+        ckpt["ema_denoiser"] = ema_denoiser.state_dict()
+    if lr_scheduler is not None:
+        ckpt["lr_scheduler"] = lr_scheduler.state_dict()
     torch.save(ckpt, ckpt_path)
 
 

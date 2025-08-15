@@ -83,24 +83,39 @@ disentangle:
   encoder:   # residual MLP 
     input_dim: 1024
     hidden_dim: 2048
-    num_layers: 4
+    num_layers: 8
+    dropout: 0.1  
+    layernorm: true
 
   denoiser:   # SimpleMLPAdaLN  
     model_channels: 2048
-    num_res_blocks: 4
+    num_res_blocks: 8
     beta_schedule: "cosine"
     timesteps: 1000
     beta_start: 1e-4
     beta_end: 2e-2
     grad_ckpt: false
+    timestep_sampler:
+      type: "lognormal"      
+      log_mean: -0.7        
+      log_sigma: 1.0        
+      mix_uniform_p: 0.05    
+      clip_quantile: 0.999   
 
   train:
-    epochs: 10000
+    epochs: 2000
     batch_size: 256
     lr: 2.0e-4
     weight_decay: 0.0
     save_interval: 500
     ckpt_dir: "checkpoints/ddpm_disentangle"
+    ema:
+      enable: true
+      decay: 0.9999
+    scheduler:
+      type: "linear-warmup_cosine-decay"   # ["none", "linear-warmup", "linear-warmup_cosine-decay"]
+      warmup_epochs: 5
+      min_lr: 1.0e-6
 
   eval:
     batch_size: 256
