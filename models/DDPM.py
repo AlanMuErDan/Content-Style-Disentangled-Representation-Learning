@@ -25,7 +25,7 @@ def cosine_beta_schedule(timesteps: int, s: float = 0.008):
 class GaussianDiffusion(nn.Module):
     """
     A self-contained scheduler that keeps all diffusion constants as buffers so
-    they are saved / moved with the model.  API 兼容原先 `DDPMNoiseScheduler`.
+    they are saved / moved with the model.
     """
     def __init__(
         self,
@@ -35,7 +35,7 @@ class GaussianDiffusion(nn.Module):
         beta_end: float = 2e-2,
         device = torch.device("cpu"),
         t_sampler: str = "uniform",      # ["uniform", "lognormal"]
-        t_log_mean: float = -0.5,        # lognormal  μ（
+        t_log_mean: float = -0.5,        # lognormal  μ
         t_log_sigma: float = 1.0,        # σ
         t_mix_uniform_p: float = 0.05,   
         t_clip_quantile: float = 0.999,  

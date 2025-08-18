@@ -84,7 +84,7 @@ disentangle:
     input_dim: 1024
     hidden_dim: 2048
     num_layers: 8
-    dropout: 0.1  
+    dropout: 0.0  
     layernorm: true
 
   denoiser:   # SimpleMLPAdaLN  
@@ -96,7 +96,7 @@ disentangle:
     beta_end: 2e-2
     grad_ckpt: false
     timestep_sampler:
-      type: "lognormal"      
+      type: "uniform"  # uniform / lognormal     
       log_mean: -0.7        
       log_sigma: 1.0        
       mix_uniform_p: 0.05    
@@ -110,7 +110,7 @@ disentangle:
     save_interval: 500
     ckpt_dir: "checkpoints/ddpm_disentangle"
     ema:
-      enable: true
+      enable: false
       decay: 0.9999
     scheduler:
       type: "linear-warmup_cosine-decay"   # ["none", "linear-warmup", "linear-warmup_cosine-decay"]
