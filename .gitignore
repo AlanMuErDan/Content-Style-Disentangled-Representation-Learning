@@ -3,8 +3,10 @@ fonts/
 char_list.txt 
 wandb/ 
 checkpoints/ 
+configs/config_1.yaml 
 configs/config_2.yaml 
 configs/config_3.yaml 
+main_train1.py
 main_train2.py
 main_train3.py
 train_VAE_1.py

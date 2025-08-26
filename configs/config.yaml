@@ -1,5 +1,5 @@
 # GLOBAL CONFIGURATION
-train_stage: disentangle           # disentangle / VAE
+train_stage: disentangle_mar     # disentangle_regression / disentangle_mar / disentangle_sd / VAE
 img_size: 128
 data_dir: ./data
 batch_size: 32
@@ -67,13 +67,14 @@ vae:
 
 
 
-# DISENTANGLE CONFIGURATION
-disentangle:
+# DISENTANGLE MAR CONFIGURATION
+disentangle_mar:
   seed: 10086
+  num_workers: 1
 
   dataset:
-    pt_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_v2.pt"
-    chars_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/intersection_chars.txt"
+    pt_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_v2_temp.pt"
+    chars_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/intersection_chars_temp.txt"
     stats_yaml: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/latent_stats.yaml"
     font_json: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_list.json"
     train_ratio: 0.9
@@ -81,6 +82,7 @@ disentangle:
     augment_prob: 0.0
 
   encoder:   # residual MLP 
+    enable: true
     input_dim: 1024
     hidden_dim: 2048
     num_layers: 8
@@ -110,12 +112,180 @@ disentangle:
     save_interval: 500
     ckpt_dir: "checkpoints/ddpm_disentangle"
     ema:
-      enable: false
+      enable: true
       decay: 0.9999
     scheduler:
       type: "linear-warmup_cosine-decay"   # ["none", "linear-warmup", "linear-warmup_cosine-decay"]
-      warmup_epochs: 5
+      warmup_epochs: 0
       min_lr: 1.0e-6
+    cfg:
+      enable: true
+      scale: 3.0
+      p_uncond: 0.1
+
+  eval:
+    batch_size: 256
+    interval: 1       # validation after every epoch 
+
+  wandb:
+    enable: true
+    project: "font_disentangle_ddpm"
+    log_interval: 10
+  
+  vis:
+    enable: true           # 关闭可设 false
+    vae_config: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/config.yaml"
+    vae_ckpt:   "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/vae_best_ckpt.pth"
+  
+  sample:
+    steps: 50                 # 采样步数
+    train_interval_step: 500  # 每 500 step 记录一次训练采样
+
+
+# DISENTENGLE STABLE DIFFUSION CONDIGURATION 
+disentangle_sd:
+  seed: 10086
+  num_workers: 1
+  # ---- dataset ----
+  dataset:
+    pt_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_v2_temp.pt"
+    chars_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/intersection_chars_temp.txt"
+    stats_yaml: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/latent_stats.yaml"
+    font_json: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_list.json"
+    train_ratio: 0.9
+    latent_size: 16
+    augment_prob: 0.0
+    latent_channels: 4
+
+  # ---- encoder (content/style) ----
+  encoder:
+    enable: true
+    input_dim: 1024       # 4*16*16 flattened
+    hidden_dim: 2048
+    num_layers: 4
+    dropout: 0.1
+    layernorm: true
+    content_dim: 1024     # split of the MLP output
+    style_dim: 1024
+
+  # ---- denoiser (our LDM-style UNet) ----
+  denoiser:
+    base_channels: 256
+    channel_mults: [1, 2, 2]     # -> channel_mult in code
+    num_res_blocks: 2
+    num_heads: 8                 # attention heads
+    ctx_dim: 768                 # token width for cross-attn
+    n_content_tokens: 1
+    n_style_tokens: 1
+
+    # diffusion schedule
+    timesteps: 1000
+    beta_start: 1.0e-4
+    beta_end: 2.0e-2
+    beta_schedule: "linear"
+    timestep_sampler:
+      type: "uniform"
+      log_mean: -0.5
+      log_sigma: 1.0
+      mix_uniform_p: 0.05
+      clip_quantile: 0.999
+
+  # ---- training ----
+  train:
+    batch_size: 256
+    epochs: 200
+    lr: 2.0e-4
+    weight_decay: 0.0
+    save_interval: 10
+    ckpt_dir: "checkpoints/sd_unet"
+
+    # scheduler (optional)
+    scheduler:
+      type: "linear-warmup_cosine-decay"
+      warmup_epochs: 2
+      min_lr: 1.0e-6
+
+    # classifier-free guidance (drop condition during training)
+    cfg:
+      enable: true
+      p_uncond: 0.1
+      scale: 3.0           # used for sampling/vis
+
+    # EMA (optional)
+    ema:
+      enable: true
+      decay: 0.9999
+
+  # ---- evaluation / logging ----
+  eval:
+    batch_size: 256
+    interval: 1
+
+  wandb:
+    enable: true   # set true if you want logging
+    project: "font-disentangle"
+    run_name: "sd-unet"
+    log_interval: 10
+
+  vis:
+    enable: true           # 关闭可设 false
+    vae_config: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/config.yaml"
+    vae_ckpt:   "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/vae_best_ckpt.pth"
+
+# DISENTANGLE BASELINE REGRESSION CONFIGURATION
+disentangle_regression:
+  seed: 10086
+
+  dataset:
+    pt_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_v2_temp.pt"
+    chars_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/intersection_chars_temp.txt"
+    stats_yaml: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/latent_stats.yaml"
+    font_json: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_list.json"
+    train_ratio: 0.9
+    latent_size: 16          # 16×16×4 → flatten 1024
+    augment_prob: 0.0
+
+  encoder:   # residual MLP 
+    enable: true
+    input_dim: 1024
+    hidden_dim: 2048
+    num_layers: 8
+    dropout: 0.0  
+    layernorm: true
+
+  denoiser:   # SimpleMLPAdaLN  
+    model_channels: 2048
+    num_res_blocks: 8
+    beta_schedule: "cosine"
+    timesteps: 1000
+    beta_start: 1e-4
+    beta_end: 2e-2
+    grad_ckpt: false
+    timestep_sampler:
+      type: "uniform"  # uniform / lognormal     
+      log_mean: -0.7        
+      log_sigma: 1.0        
+      mix_uniform_p: 0.05    
+      clip_quantile: 0.999   
+
+  train:
+    epochs: 2000
+    batch_size: 256
+    lr: 2.0e-4
+    weight_decay: 0.0
+    save_interval: 500
+    ckpt_dir: "checkpoints/ddpm_disentangle"
+    ema:
+      enable: true
+      decay: 0.9999
+    scheduler:
+      type: "linear-warmup_cosine-decay"   # ["none", "linear-warmup", "linear-warmup_cosine-decay"]
+      warmup_epochs: 0
+      min_lr: 1.0e-6
+    cfg:
+      enable: true
+      scale: 3.0
+      p_uncond: 0.1
 
   eval:
     batch_size: 256
@@ -136,4 +306,3 @@ disentangle:
   sample:
     steps: 50                 # 采样步数
     train_interval_step: 500  # 每 500 step 记录一次训练采样
-
