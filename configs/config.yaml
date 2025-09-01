@@ -75,7 +75,7 @@ disentangle_mar:
   dataset:
     pt_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_v2_temp.pt"
     chars_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/intersection_chars_temp.txt"
-    stats_yaml: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/latent_stats.yaml"
+    stats_yaml: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/latent_stats_temp.yaml"
     font_json: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_list.json"
     train_ratio: 0.9
     latent_size: 16          # 16×16×4 → flatten 1024
@@ -85,13 +85,13 @@ disentangle_mar:
     enable: true
     input_dim: 1024
     hidden_dim: 2048
-    num_layers: 8
+    num_layers: 4
     dropout: 0.0  
     layernorm: true
 
   denoiser:   # SimpleMLPAdaLN  
     model_channels: 2048
-    num_res_blocks: 8
+    num_res_blocks: 4
     beta_schedule: "cosine"
     timesteps: 1000
     beta_start: 1e-4
@@ -105,7 +105,7 @@ disentangle_mar:
       clip_quantile: 0.999   
 
   train:
-    epochs: 2000
+    epochs: 20000
     batch_size: 256
     lr: 2.0e-4
     weight_decay: 0.0

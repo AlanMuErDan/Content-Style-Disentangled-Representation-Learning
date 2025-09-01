@@ -498,7 +498,7 @@ def log_sample_images(
             lat = denorm(lat)
             img = vae_decode(lat, decoder, vae_cfg, device)  # returns PIL
             t = to_tensor(img) # original
-            t = (t >= 0.5).float()  # binary
+            # t = (t >= 0.5).float()  # binary
             decoded_imgs.append(t)
         return decoded_imgs
 

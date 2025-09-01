@@ -168,7 +168,7 @@ class FourWayFontPairLatentPTDataset(Dataset):
         if isinstance(blob, dict) and "latents" in blob:
             latents = blob["latents"]
         else:
-            latents = blob  # allow raw tensor
+            latents = blob  # allow raw tensor 
         if not isinstance(latents, torch.Tensor):
             raise TypeError(f"Expected torch.Tensor, got {type(latents)}")
         if latents.dim() != 4:
