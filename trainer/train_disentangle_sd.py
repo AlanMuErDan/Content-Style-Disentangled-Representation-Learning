@@ -1,5 +1,4 @@
 # trainer/train_disentangle_sd.py
-# Training loop using SD-style UNet denoiser on (B,4,16,16) latents with content&style conditioning.
 
 import os
 import yaml
@@ -21,6 +20,8 @@ from dataset.font_dataset import FourWayFontPairLatentPTDataset, split_fonts, fi
 from models.mlp import build_residual_mlp
 from models.unet import CSUNetDenoiser, CSCondCfg
 from models.DDPM import GaussianDiffusion as DDPMNoiseScheduler
+from models.flow_matching import FlowMatching, LinearRFPath, FM_CFG_Wrapper
+
 from utils.logger import init_wandb, log_losses
 from utils.vae_io import load_models, decode as vae_decode
 from utils.lr_scheduler import (
@@ -28,6 +29,7 @@ from utils.lr_scheduler import (
     Scheduler_LinearWarmup_CosineDecay,
 )
 from utils.ema import LitEma
+from utils.evaluate_basic import compute_psnr, compute_ssim, compute_metrics
 
 
 class CFGDenoiser:
@@ -107,10 +109,8 @@ def train_disentangle_loop_sd(cfg: dict):
     torch.manual_seed(cfg.get("seed", 1234))
     random.seed(cfg.get("seed", 1234))
 
-    # --- VAE for visualization ---
     encoder_vae, decoder_vae, vae_cfg, _ = load_models(cfg["vis"]["vae_config"], cfg["vis"]["vae_ckpt"], device)
 
-    # --- Content/Style encoder (optional) ---
     enc_cfg = cfg.get("encoder", {})
     use_encoder = bool(enc_cfg.get("enable", True))
     if use_encoder:
@@ -124,10 +124,8 @@ def train_disentangle_loop_sd(cfg: dict):
     else:
         encoder = None
 
-    # --- Data ---
     dl_train, dl_valid, denorm = build_dataloaders(cfg)
 
-    # --- Denoiser: SD-style UNet on (B,4,16,16) with C&S cross-attn ---
     cs_cfg = CSCondCfg(
         content_dim=enc_cfg.get("content_dim", 1024),
         style_dim=enc_cfg.get("style_dim",   1024),
@@ -147,7 +145,6 @@ def train_disentangle_loop_sd(cfg: dict):
         cs_cfg=cs_cfg,
     ).to(device)
 
-    # --- Optimizer/Scheduler ---
     params = list(denoiser.parameters()) + (list(encoder.parameters()) if (use_encoder and encoder is not None) else [])
     opt = optim.AdamW(
         params, lr=cfg["train"]["lr"], betas=(0.9, 0.999), weight_decay=cfg["train"].get("weight_decay", 0.0)
@@ -169,33 +166,49 @@ def train_disentangle_loop_sd(cfg: dict):
         lr_lambda = lambda step: 1.0
     lr_scheduler = LambdaLR(opt, lr_lambda)
 
-    # --- EMA ---
     ema_cfg = cfg["train"].get("ema", {})
     use_ema = bool(ema_cfg.get("enable", False))
     ema_decay = float(ema_cfg.get("decay", 0.9999))
     ema_encoder = LitEma(encoder, decay=ema_decay) if (use_ema and use_encoder and encoder is not None) else None
     ema_denoiser = LitEma(denoiser, decay=ema_decay) if use_ema else None
 
-    # --- Diffusion schedule ---
-    sampler_cfg = cfg["denoiser"].get("timestep_sampler", {})
-    noise_sched = DDPMNoiseScheduler(
-        timesteps=cfg["denoiser"].get("timesteps", 1000),
-        beta_start=float(cfg["denoiser"].get("beta_start", 1e-4)),
-        beta_end=float(cfg["denoiser"].get("beta_end", 2e-2)),
-        beta_schedule=cfg["denoiser"].get("beta_schedule", "linear"),
-        device=device,
-        t_sampler=sampler_cfg.get("type", "uniform"),
-        t_log_mean=float(sampler_cfg.get("log_mean", -0.5)),
-        t_log_sigma=float(sampler_cfg.get("log_sigma", 1.0)),
-        t_mix_uniform_p=float(sampler_cfg.get("mix_uniform_p", 0.05)),
-        t_clip_quantile=float(sampler_cfg.get("clip_quantile", 0.999)),
-    ).to(device)
+    algo_type = cfg.get("algo", {}).get("type", "ddpm").lower()
 
-    # --- WandB ---
+    sampler_cfg = cfg["denoiser"].get("timestep_sampler", {})
+
+    if algo_type == "ddpm":
+        noise_sched = DDPMNoiseScheduler(
+            timesteps=cfg["denoiser"].get("timesteps", 1000),
+            beta_start=float(cfg["denoiser"].get("beta_start", 1e-4)),
+            beta_end=float(cfg["denoiser"].get("beta_end", 2e-2)),
+            beta_schedule=cfg["denoiser"].get("beta_schedule", "linear"),
+            device=device,
+            t_sampler=sampler_cfg.get("type", "uniform"),
+            t_log_mean=float(sampler_cfg.get("log_mean", -0.5)),
+            t_log_sigma=float(sampler_cfg.get("log_sigma", 1.0)),
+            t_mix_uniform_p=float(sampler_cfg.get("mix_uniform_p", 0.05)),
+            t_clip_quantile=float(sampler_cfg.get("clip_quantile", 0.999)),
+        ).to(device)
+    else:
+        fm_cfg = cfg.get("flow_matching", {})
+        path_cfg = fm_cfg.get("path", {})
+        path = LinearRFPath(
+            t_sampler=path_cfg.get("t_sampler", "uniform"),
+            ln_mu=float(path_cfg.get("ln_mu", -0.5)),
+            ln_sigma=float(path_cfg.get("ln_sigma", 1.0)),
+            mix_unif_p=float(path_cfg.get("mix_unif_p", 0.05)),
+            clip_q=float(path_cfg.get("clip_q", 0.999)),
+        )
+        noise_sched = FlowMatching(
+            path=path,
+            t_epsilon=float(fm_cfg.get("t_epsilon", 1e-5)),
+            ode_solver=str(fm_cfg.get("ode_solver", "heun")),
+            ode_steps=int(fm_cfg.get("ode_steps", cfg["sample"].get("steps", 50))),
+        ).to(device)
+
     if cfg.get("wandb", {}).get("enable", False):
         init_wandb(cfg)
 
-    # --- Train ---
     cfg_train = cfg.get("train", {}).get("cfg", {})
     cfg_enable = bool(cfg_train.get("enable", False))
     p_uncond = float(cfg_train.get("p_uncond", 0.1))
@@ -206,15 +219,25 @@ def train_disentangle_loop_sd(cfg: dict):
             encoder.train()
         denoiser.train()
 
+        if step < sampler_cfg.get("warmup", 10000):
+            if algo_type == "ddpm":
+                noise_sched.t_sampler = "uniform"
+            else:
+                noise_sched.path.t_sampler = "uniform"
+        else:
+            if algo_type == "ddpm":
+                noise_sched.t_sampler = sampler_cfg.get("type", "uniform")
+            else:
+                noise_sched.path.t_sampler = sampler_cfg.get("type", "uniform")
+
+
         pbar = tqdm(dl_train, desc=f"Epoch {epoch+1}/{cfg['train']['epochs']}")
         for batch in pbar:
-            # Latents as (B, 4, 16, 16); keep 2 recon targets as in your original loop
             x_fa_ca = batch["F_A+C_A"].to(device)
             x_fa_cb = batch["F_A+C_B"].to(device)
             x_fb_ca = batch["F_B+C_A"].to(device)
             x_fb_cb = batch["F_B+C_B"].to(device)
 
-            # Build content/style conditioners
             if use_encoder and encoder is not None:
                 z_fa_ca = encoder(x_fa_ca.view(x_fa_ca.size(0), -1))  # (B, 2048)
                 z_fb_cb = encoder(x_fb_cb.view(x_fb_cb.size(0), -1))
@@ -223,33 +246,37 @@ def train_disentangle_loop_sd(cfg: dict):
                 cond_cA_sB = torch.cat([content_fa, style_fb], dim=1)  # (B, 2048)
                 cond_cB_sA = torch.cat([content_fb, style_fa], dim=1)  # (B, 2048)
             else:
-                # Fallback (uses raw latents flattened; not ideal, but preserves your original logic)
                 fa_ca_flat = x_fa_ca.view(x_fa_ca.size(0), -1)
                 fb_cb_flat = x_fb_cb.view(x_fb_cb.size(0), -1)
                 cond_cA_sB = torch.cat([fa_ca_flat, fb_cb_flat], dim=1)[:, :2048]
                 cond_cB_sA = torch.cat([fb_cb_flat, fa_ca_flat], dim=1)[:, :2048]
 
             B = x_fb_ca.size(0)
-            t = noise_sched.sample_timesteps(B)
+            t = noise_sched.sample_timesteps(B, device=x_fb_ca.device)
 
-            # Add noise
             eps1 = torch.randn_like(x_fb_ca)
             x_t1 = noise_sched.q_sample(x_fb_ca.view(B, -1), t, eps1.view(B, -1)).view_as(x_fb_ca)
 
             eps2 = torch.randn_like(x_fa_cb)
             x_t2 = noise_sched.q_sample(x_fa_cb.view(B, -1), t, eps2.view(B, -1)).view_as(x_fa_cb)
 
-            # CFG dropout on condition vectors (training-time)
             if cfg_enable and p_uncond > 0.0:
                 drop = (torch.rand(B, device=device) < p_uncond).float().unsqueeze(1)
                 cond_cA_sB = cond_cA_sB * (1.0 - drop)
                 cond_cB_sA = cond_cB_sA * (1.0 - drop)
 
-            # Predict eps
-            eps_hat1 = denoiser(x_t1, t, cond_cA_sB)  # (B,4,16,16)
-            eps_hat2 = denoiser(x_t2, t, cond_cB_sA)
+            if algo_type == "ddpm":
+                eps_hat1 = denoiser(x_t1, t, cond_cA_sB)
+                eps_hat2 = denoiser(x_t2, t, cond_cB_sA)
+                loss = 0.5 * (F.mse_loss(eps_hat1, eps1) + F.mse_loss(eps_hat2, eps2))
+            else:
+                # Flow Matching: v = eps - x0
+                v_tgt1 = x_fb_ca - eps1 
+                v_tgt2 = x_fa_cb - eps2
+                v_hat1 = denoiser(x_t1, t.float(), cond_cA_sB)
+                v_hat2 = denoiser(x_t2, t.float(), cond_cB_sA)
+                loss = 0.5 * (F.mse_loss(v_hat1, v_tgt1) + F.mse_loss(v_hat2, v_tgt2))
 
-            loss = 0.5 * (F.mse_loss(eps_hat1, eps1) + F.mse_loss(eps_hat2, eps2))
 
             opt.zero_grad(set_to_none=True)
             loss.backward()
@@ -283,10 +310,10 @@ def train_disentangle_loop_sd(cfg: dict):
 
             train_batch = next(iter(dl_train))
             log_sample_images(
-                step, train_batch,  # FIX: 传 use_encoder
+                step, train_batch,  
                 encoder, denoiser, noise_sched,
                 decoder_vae, vae_cfg, denorm,
-                device, name="train/quad_grid", use_encoder=use_encoder, cfg=cfg
+                device, name="train/quad_grid", use_encoder=use_encoder, cfg=cfg, algo_type=algo_type
             )
 
             if use_ema:
@@ -295,16 +322,14 @@ def train_disentangle_loop_sd(cfg: dict):
                 if ema_denoiser is not None:
                     ema_denoiser.restore(denoiser.parameters())
 
-        # Validation
         if (epoch + 1) % cfg["eval"]["interval"] == 0:
-            val_loss, vis_batch = evaluate(dl_valid, encoder, denoiser, noise_sched, device, use_encoder)
+            val_loss, vis_batch = evaluate(dl_valid, encoder, denoiser, noise_sched, device, use_encoder, algo_type)
             if cfg["wandb"]["enable"]:
                 log_losses(step=step, loss_dict={"valid/loss": val_loss})
                 if cfg["vis"]["enable"]:
                     log_sample_images(step, vis_batch, encoder, denoiser, noise_sched,
-                                      decoder_vae, vae_cfg, denorm, device, "val/quad_grid", cfg, use_encoder)
+                                      decoder_vae, vae_cfg, denorm, device, "val/quad_grid", cfg, use_encoder, algo_type=algo_type)
 
-        # Save
         if (epoch + 1) % cfg["train"]["save_interval"] == 0:
             save_ckpt(cfg, epoch, encoder, denoiser, opt,
                       ema_encoder if use_ema else None,
@@ -313,7 +338,7 @@ def train_disentangle_loop_sd(cfg: dict):
 
 
 @torch.no_grad()
-def evaluate(loader, encoder, denoiser, scheduler, device, use_encoder: bool):
+def evaluate(loader, encoder, denoiser, scheduler, device, use_encoder: bool, algo_type: str):
     if use_encoder and encoder is not None:
         encoder.eval()
     denoiser.eval()
@@ -334,15 +359,22 @@ def evaluate(loader, encoder, denoiser, scheduler, device, use_encoder: bool):
             cond2 = torch.cat([fb_cb.view(fb_cb.size(0), -1), fa_ca.view(fa_ca.size(0), -1)], dim=1)[:, :2048]
 
         B = fa_ca.size(0)
-        t = scheduler.sample_timesteps(B)
+        t = scheduler.sample_timesteps(B, device=fb_ca.device)
 
         eps1 = torch.randn_like(fb_ca); x_t1 = scheduler.q_sample(fb_ca.view(B, -1), t, eps1.view(B, -1)).view_as(fb_ca)
         eps2 = torch.randn_like(fa_cb); x_t2 = scheduler.q_sample(fa_cb.view(B, -1), t, eps2.view(B, -1)).view_as(fa_cb)
 
-        eps_hat1 = denoiser(x_t1, t, cond1)
-        eps_hat2 = denoiser(x_t2, t, cond2)
+        if algo_type == "ddpm":
+            eps_hat1 = denoiser(x_t1, t, cond1)
+            eps_hat2 = denoiser(x_t2, t, cond2)
+            losses.append(0.5 * (F.mse_loss(eps_hat1, eps1) + F.mse_loss(eps_hat2, eps2)).item())
+        else:
+            v_tgt1 = fb_ca - eps1 
+            v_tgt2 = fa_cb - eps2
+            v_hat1 = denoiser(x_t1, t.float(), cond1)
+            v_hat2 = denoiser(x_t2, t.float(), cond2)
+            losses.append(0.5 * (F.mse_loss(v_hat1, v_tgt1) + F.mse_loss(v_hat2, v_tgt2)).item())
 
-        losses.append(0.5 * (F.mse_loss(eps_hat1, eps1) + F.mse_loss(eps_hat2, eps2)).item())
         sample_batch = batch
 
     return sum(losses) / len(losses), sample_batch
@@ -350,7 +382,9 @@ def evaluate(loader, encoder, denoiser, scheduler, device, use_encoder: bool):
 
 @torch.no_grad()
 def log_sample_images(step, batch, encoder, denoiser, scheduler,
-                      decoder, vae_cfg, denorm, device, name, cfg, use_encoder: bool, num_show: int = 4):
+                      decoder, vae_cfg, denorm, device, name, cfg, use_encoder: bool, num_show: int = 4, algo_type: str = "ddpm"):
+    encoder.eval()
+    denoiser.eval()
     to_tensor = transforms.ToTensor()
     B_all = batch["F_A+C_A"].size(0)
     idx = random.sample(range(B_all), k=min(num_show, B_all))
@@ -372,23 +406,25 @@ def log_sample_images(step, batch, encoder, denoiser, scheduler,
     # CFG sampling
     use_cfg = bool(cfg.get("train", {}).get("cfg", {}).get("enable", False))
     cfg_scale = float(cfg.get("train", {}).get("cfg", {}).get("scale", 3.0))
-    if use_cfg:
-        guided = CFGDenoiser(denoiser, cfg_scale)
-        lat_fb_ca = scheduler.p_sample_loop(guided, (len(idx), 4, 16, 16), cond1, device)
-        lat_fa_cb = scheduler.p_sample_loop(guided, (len(idx), 4, 16, 16), cond2, device)
+    
+    if use_cfg and algo_type == "flow_matching":
+        guided = FM_CFG_Wrapper(denoiser, cfg_scale)
+    elif use_cfg:
+        guided = CFGDenoiser(denoiser, cfg_scale)  #  DDPM
     else:
-        lat_fb_ca = scheduler.p_sample_loop(denoiser, (len(idx), 4, 16, 16), cond1, device)
-        lat_fa_cb = scheduler.p_sample_loop(denoiser, (len(idx), 4, 16, 16), cond2, device)
+        guided = denoiser
+
+    lat_fb_ca = scheduler.p_sample_loop(guided, (len(idx), 4, 16, 16), cond1, device)
+    lat_fa_cb = scheduler.p_sample_loop(guided, (len(idx), 4, 16, 16), cond2, device)
+
 
     def decode_batch(lat_batch):
         imgs = []
         for lat in lat_batch:
             lat = denorm(lat)
             pil = vae_decode(lat, decoder, vae_cfg, device)
-
             t = to_tensor(pil) # original
-            t = (t >= 0.5).float()  # binary  
-
+            # t = (t >= 0.5).float()  # binary  
             imgs.append(t)
         return imgs
 
@@ -406,6 +442,17 @@ def log_sample_images(step, batch, encoder, denoiser, scheduler,
         ], dim=2))
     grid = make_grid(torch.stack(rows), nrow=1, padding=2)
     wandb.log({name: wandb.Image(grid)}, step=step)
+
+    img_gt_fa_cb = torch.stack(img_gt_fa_cb)
+    img_gt_fb_ca = torch.stack(img_gt_fb_ca)
+    img_gen_fa_cb = torch.stack(img_gen_fa_cb)
+    img_gen_fb_ca = torch.stack(img_gen_fb_ca)
+
+    if cfg.get("wandb", {}).get("enable", False):
+        metrics_fa_cb = compute_metrics(img_gen_fa_cb, img_gt_fa_cb)
+        metrics_fb_ca = compute_metrics(img_gen_fb_ca, img_gt_fb_ca)
+        averaged_metrics = {f"{name}/metric_{k}": (metrics_fa_cb[k] + metrics_fb_ca[k]) / 2 for k in metrics_fa_cb}
+        wandb.log(averaged_metrics, step=step)
 
 
 def save_ckpt(cfg, epoch, encoder, denoiser, optimizer, ema_encoder=None, ema_denoiser=None, lr_scheduler=None):
@@ -425,12 +472,3 @@ def save_ckpt(cfg, epoch, encoder, denoiser, optimizer, ema_encoder=None, ema_de
     if lr_scheduler is not None:
         ckpt["lr_scheduler"] = lr_scheduler.state_dict()
     torch.save(ckpt, ckpt_path)
-
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="configs/ddpm_disentangle_sd.yaml")
-    args = parser.parse_args()
-    cfg = load_config(args.config)
-    train_loop(cfg)

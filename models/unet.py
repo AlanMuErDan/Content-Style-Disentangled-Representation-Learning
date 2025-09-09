@@ -1,15 +1,9 @@
 # models/unet.py 
-# Content-Style conditional UNet, implemented on top of the "official" LDM UNetModel
-# you pasted (same internals: ResBlock, SpatialTransformer, FiLM-like scale_shift).
-# This keeps the API compatible with your trainer: forward(x, t, c) and forward_with_cfg(...).
 
 from dataclasses import dataclass
 from typing import Optional, Tuple
-
 import torch
 import torch.nn as nn
-
-# --- Use the same official LDM utilities & modules you pasted ---
 from .unet_utils import (
     checkpoint,
     conv_nd,
@@ -22,9 +16,6 @@ from .unet_utils import (
 from .unet_utils import SpatialTransformer
 
 
-# ---------------------------------------------------------------------
-# Minimal copies of helper blocks (kept identical to the "official" style)
-# ---------------------------------------------------------------------
 class TimestepBlock(nn.Module):
     def forward(self, x, emb):
         raise NotImplementedError
@@ -171,9 +162,6 @@ class ResBlock(TimestepBlock):
         return self.skip_connection(x) + h
 
 
-# ---------------------------------------------------------------------
-# Official-logic UNetModel with SpatialTransformer cross-attention
-# ---------------------------------------------------------------------
 class UNetModel(nn.Module):
     """
     A faithful reimplementation of the official LDM UNet (shortened comments).
@@ -338,30 +326,36 @@ class UNetModel(nn.Module):
         return self.out(h)
 
 
-# ---------------------------------------------------------------------
-# Content/Style conditioning: tokens for cross-attention
-# ---------------------------------------------------------------------
+####### Self-designed part 
+
+
 @dataclass
 class CSCondCfg:
     content_dim: int = 1024
     style_dim: int = 1024
-    ctx_dim: int = 768
+    ctx_dim: int = 1024
     n_content_tokens: int = 1
     n_style_tokens: int = 1
     use_learned_null: bool = True
 
 
 class ContentStyleToTokens(nn.Module):
-    def __init__(self, cfg: CSCondCfg):
+    def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.proj_c = nn.Linear(cfg.content_dim, cfg.n_content_tokens * cfg.ctx_dim)
-        self.proj_s = nn.Linear(cfg.style_dim,   cfg.n_style_tokens   * cfg.ctx_dim)
-        nn.init.normal_(self.proj_c.weight, std=0.02); nn.init.zeros_(self.proj_c.bias)
-        nn.init.normal_(self.proj_s.weight, std=0.02); nn.init.zeros_(self.proj_s.bias)
-        self.null_embed = nn.Parameter(
-            torch.zeros(1, (cfg.n_content_tokens + cfg.n_style_tokens), cfg.ctx_dim)
-        ) if cfg.use_learned_null else None
+        if cfg.n_content_tokens == 1 and cfg.ctx_dim == cfg.content_dim:
+            self.proj_c = nn.Identity()
+        else:
+            self.proj_c = nn.Linear(cfg.content_dim, cfg.n_content_tokens * cfg.ctx_dim)
+
+        if cfg.n_style_tokens == 1 and cfg.ctx_dim == cfg.style_dim:
+            self.proj_s = nn.Identity()
+        else:
+            self.proj_s = nn.Linear(cfg.style_dim, cfg.n_style_tokens * cfg.ctx_dim)
+
+        self.null_embed = nn.Parameter(torch.zeros(
+            1, cfg.n_content_tokens + cfg.n_style_tokens, cfg.ctx_dim
+        )) if cfg.use_learned_null else None
 
     def to_tokens(self, content: torch.Tensor, style: torch.Tensor) -> torch.Tensor:
         B = content.size(0)
@@ -375,9 +369,6 @@ class ContentStyleToTokens(nn.Module):
         return torch.zeros(B, self.cfg.n_content_tokens + self.cfg.n_style_tokens, self.cfg.ctx_dim, device=device)
 
 
-# ---------------------------------------------------------------------
-# Wrapper that matches your trainer API
-# ---------------------------------------------------------------------
 class CSUNetDenoiser(nn.Module):
     """
     Wrapper around the official-style UNetModel:
@@ -445,3 +436,164 @@ class CSUNetDenoiser(nn.Module):
         eps_uncond = self.unet(x, timesteps=t, context=ctx_null)
         eps_cond   = self.unet(x, timesteps=t, context=ctx_cond)
         return eps_uncond + cfg_scale * (eps_cond - eps_uncond)
+
+
+
+# === Append this to the end of models/unet.py ===
+# Sanity check: run a forward pass with B=32, C=4, H=W=16 and print shapes at key steps.
+
+if __name__ == "__main__":
+    import torch
+    from typing import Tuple
+
+    # ----- Device -----
+    device = (
+        torch.device("cuda") if torch.cuda.is_available()
+        else torch.device("mps") if hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        else torch.device("cpu")
+    )
+    torch.manual_seed(0)
+
+    # ----- Config consistent with your trainer -----
+    sample_size = 16
+    in_channels = out_channels = 4
+    base_channels = 256
+    channel_mult: Tuple[int, ...] = (1, 2, 2)
+    num_res_blocks = 2
+    num_heads = 8
+
+    cs_cfg = CSCondCfg(
+        content_dim=1024,
+        style_dim=1024,
+        ctx_dim=1024,
+        n_content_tokens=1,
+        n_style_tokens=1,
+        use_learned_null=True,
+    )
+
+    # ----- Instantiate model -----
+    model = CSUNetDenoiser(
+        sample_size=sample_size,
+        in_channels=in_channels,
+        out_channels=out_channels,
+        base_channels=base_channels,
+        channel_mult=channel_mult,
+        num_res_blocks=num_res_blocks,
+        num_heads=num_heads,
+        cs_cfg=cs_cfg,
+    ).to(device)
+    model.eval()
+
+    # ----- Dummy inputs -----
+    B = 32
+    x = torch.randn(B, in_channels, sample_size, sample_size, device=device)
+    t = torch.randint(low=0, high=1000, size=(B,), device=device)
+    c = torch.randn(B, cs_cfg.content_dim + cs_cfg.style_dim, device=device)
+
+    print("\n=== INPUTS ===")
+    print(f"x:            {tuple(x.shape)}   (B, C, H, W)")
+    print(f"t:            {tuple(t.shape)}   (B,)")
+    print(f"c:            {tuple(c.shape)}   (B, content_dim+style_dim) = (B, {cs_cfg.content_dim + cs_cfg.style_dim})")
+
+    # ----- Inspect condition split & tokens -----
+    content, style = model._split_c(c)
+    print("\n=== CONDITION SPLIT ===")
+    print(f"content:      {tuple(content.shape)}   (B, {cs_cfg.content_dim})")
+    print(f"style:        {tuple(style.shape)}     (B, {cs_cfg.style_dim})")
+
+    ctx = model.cs_tokens.to_tokens(content, style)
+    ctx_null = model.cs_tokens.null_tokens(B, device)
+    print("\n=== CONDITION -> TOKENS ===")
+    print(f"ctx(cond):    {tuple(ctx.shape)}       (B, N_ctx, ctx_dim) with N_ctx={cs_cfg.n_content_tokens + cs_cfg.n_style_tokens}, ctx_dim={cs_cfg.ctx_dim}")
+    print(f"ctx(null):    {tuple(ctx_null.shape)}  (B, N_ctx, ctx_dim) [learned null tokens]")
+
+    # ----- Inspect timestep embedding shapes (match UNet forward logic) -----
+    t_emb = timestep_embedding(t, model.unet.model_channels, repeat_only=False)
+    emb = model.unet.time_embed(t_emb)
+    print("\n=== TIME EMBEDDINGS ===")
+    print(f"timestep_embedding: {tuple(t_emb.shape)}    (B, model_channels={model.unet.model_channels})")
+    print(f"time_embed(MLP):    {tuple(emb.shape)}     (B, time_embed_dim={model.unet.model_channels * 4})")
+
+    # ----- Register detailed shape hooks -----
+    hooks = []
+
+    def hook_timestep_seq(name):
+        def _hook(mod, inputs, output):
+            # inputs for TimestepEmbedSequential: (x, emb, context) or (x, emb) depending on caller
+            x_in = inputs[0]
+            emb_in = inputs[1] if len(inputs) > 1 else None
+            ctx_in = inputs[2] if len(inputs) > 2 else None
+            print(f"[{name}] TimestepEmbedSequential IN : x={tuple(x_in.shape)}"
+                  f", emb={None if emb_in is None else tuple(emb_in.shape)}"
+                  f", ctx={None if ctx_in is None else tuple(ctx_in.shape)}")
+            print(f"[{name}] TimestepEmbedSequential OUT: x={tuple(output.shape)}")
+        return _hook
+
+    def hook_resblock(name):
+        def _hook(mod, inputs, output):
+            x_in, emb_in = inputs
+            print(f"  └─[{name}] ResBlock      IN : x={tuple(x_in.shape)}, emb={tuple(emb_in.shape)}")
+            print(f"  └─[{name}] ResBlock      OUT: x={tuple(output.shape)}")
+        return _hook
+
+    def hook_spatial(name):
+        def _hook(mod, inputs, output):
+            # inputs for SpatialTransformer: (x, context)
+            x_in = inputs[0]
+            ctx_in = inputs[1] if len(inputs) > 1 else None
+            print(f"  └─[{name}] SpatialTransformer IN : x={tuple(x_in.shape)}, ctx={None if ctx_in is None else tuple(ctx_in.shape)}")
+            print(f"  └─[{name}] SpatialTransformer OUT: x={tuple(output.shape)}")
+        return _hook
+
+    # Attach hooks to input_blocks / middle_block / output_blocks (the TimestepEmbedSequential containers)
+    for i, blk in enumerate(model.unet.input_blocks):
+        hooks.append(blk.register_forward_hook(hook_timestep_seq(f"input_blocks[{i}]")))
+        # also hook inner ResBlocks and SpatialTransformers for more detail
+        for j, sub in enumerate(blk):
+            if isinstance(sub, ResBlock):
+                hooks.append(sub.register_forward_hook(hook_resblock(f"input_blocks[{i}].ResBlock")))
+            if isinstance(sub, SpatialTransformer):
+                hooks.append(sub.register_forward_hook(hook_spatial(f"input_blocks[{i}].SpatialTransformer")))
+
+    hooks.append(model.unet.middle_block.register_forward_hook(hook_timestep_seq("middle_block")))
+    for j, sub in enumerate(model.unet.middle_block):
+        if isinstance(sub, ResBlock):
+            hooks.append(sub.register_forward_hook(hook_resblock(f"middle_block.ResBlock[{j}]")))
+        if isinstance(sub, SpatialTransformer):
+            hooks.append(sub.register_forward_hook(hook_spatial(f"middle_block.SpatialTransformer[{j}]")))
+
+    for i, blk in enumerate(model.unet.output_blocks):
+        hooks.append(blk.register_forward_hook(hook_timestep_seq(f"output_blocks[{i}]")))
+        for j, sub in enumerate(blk):
+            if isinstance(sub, ResBlock):
+                hooks.append(sub.register_forward_hook(hook_resblock(f"output_blocks[{i}].ResBlock")))
+            if isinstance(sub, SpatialTransformer):
+                hooks.append(sub.register_forward_hook(hook_spatial(f"output_blocks[{i}].SpatialTransformer")))
+
+    # Also hook the final out head
+    def hook_out(name):
+        def _hook(mod, inputs, output):
+            x_in = inputs[0]
+            print(f"[{name}] IN : x={tuple(x_in.shape)}")
+            print(f"[{name}] OUT: x={tuple(output.shape)}")
+        return _hook
+    hooks.append(model.unet.out.register_forward_hook(hook_out("out_head")))
+
+    # ----- Run forward once (conditional) -----
+    print("\n=== FORWARD (conditional) ===")
+    with torch.no_grad():
+        y = model(x, t, c)
+    print(f"\n=== OUTPUT ===")
+    print(f"y (eps prediction): {tuple(y.shape)}   (B, C, H, W) should be ({B}, {out_channels}, {sample_size}, {sample_size})")
+
+    # ----- Run forward_with_cfg once to exercise null tokens path -----
+    print("\n=== FORWARD WITH CFG (w=3.0) ===")
+    with torch.no_grad():
+        y_cfg = model.forward_with_cfg(x, t, c, cfg_scale=3.0)
+    print(f"y_cfg:              {tuple(y_cfg.shape)}  (same as y)")
+
+    # ----- Clean up hooks -----
+    for h in hooks:
+        h.remove()
+
+    print("\nSanity check finished.")

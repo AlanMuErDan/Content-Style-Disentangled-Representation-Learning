@@ -175,3 +175,51 @@ class GaussianDiffusion(nn.Module):
         x_noisy = self.q_sample(x_start, t, noise)
         pred_noise = model(x_noisy, t)
         return F.mse_loss(pred_noise, noise)
+    
+    def get_loss_weight(self, t, x_shape):
+        var_t = self._extract(1.0 - self.alphas_cumprod, t, x_shape)
+        weight = 1.0 / (var_t + 1e-8)  # avoid divide-by-zero
+        return weight
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
+    # ====== 配置 ======
+    TIMESTEPS = 1000
+    SCHEDULER = GaussianDiffusion(
+        timesteps=TIMESTEPS,
+        beta_schedule="cosine",
+        t_sampler="lognormal",
+        t_log_mean=-0.7,
+        t_log_sigma=1.0,
+        t_mix_uniform_p=0.05,
+        t_clip_quantile=0.999
+    )
+
+    # ====== 1. 可视化 loss weight vs t ======
+    t_all = torch.arange(TIMESTEPS).long()
+    weight = SCHEDULER.get_loss_weight(t_all, x_shape=(TIMESTEPS, 1, 1, 1)).view(-1).cpu().numpy()
+
+    plt.figure(figsize=(8, 5))
+    plt.plot(t_all.numpy(), weight)
+    plt.xlabel("Timestep t")
+    plt.ylabel("Loss Weight = 1 / (1 - ᾱ_t)")
+    plt.title("DDPM Loss Weight vs Timestep")
+    plt.yscale("log")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("loss_weight_vs_t.png")
+    plt.show()
+
+    # ====== 2. 可视化 lognormal + uniform 采样的 t 分布 ======
+    t_samples = SCHEDULER.sample_timesteps(100000).cpu().numpy()
+
+    plt.figure(figsize=(8, 5))
+    plt.hist(t_samples, bins=100, density=True, color='teal', alpha=0.7)
+    plt.xlabel("Sampled Timestep t")
+    plt.ylabel("Probability Density")
+    plt.title("Timestep Sampling Distribution (lognormal + 5% uniform)")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("timestep_sampling_distribution.png")
+    plt.show()
