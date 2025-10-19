@@ -1,0 +1,1339 @@
+开始旧版全数据集字体训练任务...
+开始时间: Tue Oct 14 12:27:35 PM EDT 2025
+节点信息: gr016.hpc.nyu.edu
+内存信息:
+               total        used        free      shared  buff/cache   available
+Mem:           377Gi        21Gi       224Gi       152Mi       133Gi       355Gi
+Swap:             0B          0B          0B
+GPU信息:
+Tue Oct 14 12:27:36 2025       
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 535.154.05             Driver Version: 535.154.05   CUDA Version: 12.2     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  Quadro RTX 8000                On  | 00000000:86:00.0 Off |                    0 |
+| N/A   27C    P8              24W / 250W |      0MiB / 46080MiB |      0%      Default |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+                                                                                         
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|  No running processes found                                                           |
++---------------------------------------------------------------------------------------+
+激活conda环境...
+切换到工作目录...
+数据文件信息:
+-rw-r--r--. 1 gz2199 gz2199 18G Sep 29 14:21 /scratch/gz2199/Content-Style-Disentangled-Representation-Learning/Font-Latent-Full-PT/font_latents_v2.pt
+开始运行旧版全数据集训练...
+0
+/scratch/gz2199/calli_env/lib/python3.9/site-packages/diffusers/utils/outputs.py:63: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  torch.utils._pytree._register_pytree_node(
+46
+46
+41
+46
+46
+40
+46
+46
+45
+46
+46
+40
+46
+46
+45
+46
+45
+40
+46
+46
+46
+45
+46
+46
+46
+40
+42
+40
+40
+40
+45
+45
+45
+41
+41
+45
+45
+43
+46
+40
+46
+45
+46
+45
+46
+44
+45
+40
+46
+44
+46
+46
+44
+45
+46
+46
+45
+40
+45
+46
+40
+46
+45
+46
+46
+46
+40
+40
+46
+45
+40
+45
+46
+46
+45
+45
+45
+45
+46
+46
+46
+46
+41
+46
+46
+46
+45
+45
+46
+46
+46
+42
+40
+46
+44
+46
+46
+42
+46
+46
+46
+46
+46
+42
+46
+45
+40
+45
+46
+46
+45
+46
+44
+38
+44
+44
+41
+44
+46
+46
+40
+40
+44
+46
+45
+44
+39
+45
+40
+45
+44
+45
+44
+44
+40
+44
+41
+46
+39
+45
+39
+40
+37
+40
+45
+39
+44
+44
+39
+44
+44
+44
+45
+33
+44
+39
+44
+34
+43
+43
+42
+43
+41
+45
+38
+43
+40
+45
+45
+45
+44
+39
+45
+44
+40
+45
+44
+44
+45
+45
+44
+43
+40
+43
+45
+39
+45
+45
+41
+43
+41
+44
+45
+44
+44
+0
+39
+39
+39
+44
+45
+45
+45
+45
+45
+45
+45
+45
+45
+45
+45
+45
+45
+45
+45
+45
+45
+45
+45
+45
+43
+44
+44
+44
+44
+40
+40
+43
+44
+44
+43
+43
+44
+43
+45
+45
+44
+39
+40
+40
+37
+43
+43
+45
+44
+41
+33
+33
+44
+43
+45
+40
+44
+43
+43
+44
+37
+44
+40
+37
+43
+39
+44
+34
+45
+44
+40
+39
+39
+40
+40
+39
+33
+40
+43
+43
+38
+44
+38
+44
+43
+33
+40
+33
+40
+36
+40
+40
+33
+40
+33
+34
+40
+33
+44
+39
+40
+37
+40
+36
+39
+35
+40
+44
+38
+44
+45
+45
+45
+42
+43
+42
+43
+43
+43
+37
+37
+37
+37
+33
+43
+39
+43
+38
+43
+43
+43
+43
+43
+43
+40
+39
+37
+43
+43
+43
+37
+35
+43
+37
+43
+37
+42
+43
+40
+33
+33
+37
+41
+43
+41
+40
+43
+43
+43
+40
+43
+43
+40
+38
+34
+43
+43
+43
+33
+37
+40
+40
+40
+41
+43
+43
+43
+43
+41
+36
+37
+43
+43
+43
+43
+37
+34
+39
+37
+42
+42
+38
+43
+43
+43
+36
+43
+43
+44
+33
+33
+33
+43
+37
+39
+43
+39
+40
+43
+38
+46
+45
+46
+46
+46
+============================================================
+🔤 训练内容分离任务
+============================================================
+🚀 开始全数据集字体训练...
+📊 训练配置:
+  - 任务: content
+  - 设备: cuda
+  - 风格数: 200
+  - 内容数: 500
+  - 训练样本: 50000
+  - 批量大小: 32
+  - 训练轮数: 15
+
+📥 加载潜在编码数据...
+[INFO] 缺少文件: chars_path(/scratch/gz2199/Content-Style-Disentangled-Representation-Learning/0/1/0/char_list.txt), fonts_json(/scratch/gz2199/Content-Style-Disentangled-Representation-Learning/0/1/0/lmdb_keys.json)
+[INFO] 使用fallback模式，默认2056字体×4574字符结构...
+[INFO] 使用fallback模式，采用2056字体×4574字符结构...
+[WARNING] 数据量不匹配!
+  - 实际样本: 9406200
+  - 预期样本: 9404144 (2056×4574)
+  - 将按实际数据调整结构...
+  - 调整为: 2056字体 × 4575字符
+[ImprovedLatentAccessor] Fallback模式配置:
+  - 字体数量: 2056
+  - 字符数量: 4575
+  - 数据组织: font_idx * 4575 + char_idx
+
+🔧 加载VAE解码器...
+[INFO] Loaded VAE decoder on cuda
+
+📚 创建训练数据集...
+[INFO] 创建全数据集训练器:
+  - 任务类型: content
+  - 风格数量: 200
+  - 内容数量: 500
+  - 训练样本: 50000
+  - 样本形状: torch.Size([4, 16, 16])
+
+🤖 创建Siamese模型...
+[INFO] 自动转换潜在编码类型: torch.float16 -> torch.float32
+  - 输入通道数: 1
+
+🎯 开始训练...
+  Batch 100/1563: loss=0.7129, acc=0.507
+  Batch 200/1563: loss=0.6999, acc=0.532
+  Batch 300/1563: loss=0.6788, acc=0.563
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 400/1563: loss=0.6556, acc=0.592
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 500/1563: loss=0.6336, acc=0.617
+  Batch 600/1563: loss=0.6127, acc=0.637
+  Batch 700/1563: loss=0.5967, acc=0.651
+  Batch 800/1563: loss=0.5824, acc=0.664
+  Batch 900/1563: loss=0.5690, acc=0.676
+  Batch 1000/1563: loss=0.5581, acc=0.685
+  Batch 1100/1563: loss=0.5491, acc=0.692
+  Batch 1200/1563: loss=0.5386, acc=0.699
+  Batch 1300/1563: loss=0.5294, acc=0.706
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1400/1563: loss=0.5205, acc=0.713
+  Batch 1500/1563: loss=0.5135, acc=0.718
+[Epoch 1/15] loss=0.5092, acc=0.722, lr=9.89e-05
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 100/1563: loss=0.4015, acc=0.803
+  Batch 200/1563: loss=0.3986, acc=0.805
+  Batch 300/1563: loss=0.3931, acc=0.808
+  Batch 400/1563: loss=0.3884, acc=0.812
+  Batch 500/1563: loss=0.3856, acc=0.812
+  Batch 600/1563: loss=0.3840, acc=0.813
+  Batch 700/1563: loss=0.3822, acc=0.814
+  Batch 800/1563: loss=0.3813, acc=0.815
+  Batch 900/1563: loss=0.3798, acc=0.815
+  Batch 1000/1563: loss=0.3787, acc=0.816
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1100/1563: loss=0.3768, acc=0.817
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1200/1563: loss=0.3741, acc=0.818
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1300/1563: loss=0.3719, acc=0.819
+  Batch 1400/1563: loss=0.3695, acc=0.820
+  Batch 1500/1563: loss=0.3676, acc=0.821
+[Epoch 2/15] loss=0.3662, acc=0.822, lr=9.57e-05
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 100/1563: loss=0.3436, acc=0.834
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 200/1563: loss=0.3315, acc=0.838
+  Batch 300/1563: loss=0.3299, acc=0.842
+  Batch 400/1563: loss=0.3286, acc=0.844
+  Batch 500/1563: loss=0.3296, acc=0.844
+  Batch 600/1563: loss=0.3291, acc=0.844
+  Batch 700/1563: loss=0.3274, acc=0.845
+  Batch 800/1563: loss=0.3240, acc=0.846
+  Batch 900/1563: loss=0.3239, acc=0.846
+  Batch 1000/1563: loss=0.3205, acc=0.849
+  Batch 1100/1563: loss=0.3182, acc=0.850
+  Batch 1200/1563: loss=0.3152, acc=0.852
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1300/1563: loss=0.3129, acc=0.854
+  Batch 1400/1563: loss=0.3115, acc=0.855
+  Batch 1500/1563: loss=0.3092, acc=0.856
+[Epoch 3/15] loss=0.3081, acc=0.856, lr=9.05e-05
+  Batch 100/1563: loss=0.2998, acc=0.863
+  Batch 200/1563: loss=0.2824, acc=0.873
+  Batch 300/1563: loss=0.2817, acc=0.874
+  Batch 400/1563: loss=0.2802, acc=0.877
+  Batch 500/1563: loss=0.2816, acc=0.875
+  Batch 600/1563: loss=0.2782, acc=0.876
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 700/1563: loss=0.2755, acc=0.878
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 800/1563: loss=0.2721, acc=0.879
+  Batch 900/1563: loss=0.2718, acc=0.880
+  Batch 1000/1563: loss=0.2705, acc=0.880
+  Batch 1100/1563: loss=0.2684, acc=0.881
+  Batch 1200/1563: loss=0.2680, acc=0.881
+  Batch 1300/1563: loss=0.2678, acc=0.881
+  Batch 1400/1563: loss=0.2679, acc=0.881
+  Batch 1500/1563: loss=0.2662, acc=0.882
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+[Epoch 4/15] loss=0.2651, acc=0.882, lr=8.35e-05
+  Batch 100/1563: loss=0.2492, acc=0.889
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 200/1563: loss=0.2494, acc=0.891
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 300/1563: loss=0.2426, acc=0.894
+  Batch 400/1563: loss=0.2387, acc=0.895
+  Batch 500/1563: loss=0.2403, acc=0.893
+  Batch 600/1563: loss=0.2401, acc=0.893
+  Batch 700/1563: loss=0.2385, acc=0.894
+  Batch 800/1563: loss=0.2384, acc=0.894
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 900/1563: loss=0.2394, acc=0.894
+  Batch 1000/1563: loss=0.2380, acc=0.895
+  Batch 1100/1563: loss=0.2388, acc=0.894
+  Batch 1200/1563: loss=0.2377, acc=0.895
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1300/1563: loss=0.2371, acc=0.895
+  Batch 1400/1563: loss=0.2352, acc=0.896
+  Batch 1500/1563: loss=0.2349, acc=0.896
+[Epoch 5/15] loss=0.2334, acc=0.897, lr=7.50e-05
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 100/1563: loss=0.2135, acc=0.907
+  Batch 200/1563: loss=0.2137, acc=0.907
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 300/1563: loss=0.2105, acc=0.908
+  Batch 400/1563: loss=0.2157, acc=0.906
+  Batch 500/1563: loss=0.2178, acc=0.905
+  Batch 600/1563: loss=0.2165, acc=0.905
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 700/1563: loss=0.2155, acc=0.905
+  Batch 800/1563: loss=0.2125, acc=0.907
+  Batch 900/1563: loss=0.2122, acc=0.908
+  Batch 1000/1563: loss=0.2109, acc=0.908
+  Batch 1100/1563: loss=0.2108, acc=0.907
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1200/1563: loss=0.2112, acc=0.907
+  Batch 1300/1563: loss=0.2107, acc=0.908
+  Batch 1400/1563: loss=0.2096, acc=0.909
+  Batch 1500/1563: loss=0.2090, acc=0.909
+[Epoch 6/15] loss=0.2093, acc=0.909, lr=6.55e-05
+  Batch 100/1563: loss=0.2009, acc=0.909
+  Batch 200/1563: loss=0.1985, acc=0.910
+  Batch 300/1563: loss=0.1952, acc=0.911
+  Batch 400/1563: loss=0.1935, acc=0.913
+  Batch 500/1563: loss=0.1937, acc=0.914
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 600/1563: loss=0.1946, acc=0.913
+  Batch 700/1563: loss=0.1952, acc=0.914
+  Batch 800/1563: loss=0.1970, acc=0.913
+  Batch 900/1563: loss=0.1966, acc=0.914
+  Batch 1000/1563: loss=0.1963, acc=0.914
+  Batch 1100/1563: loss=0.1956, acc=0.914
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1200/1563: loss=0.1947, acc=0.915
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1300/1563: loss=0.1940, acc=0.915
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1400/1563: loss=0.1940, acc=0.915
+  Batch 1500/1563: loss=0.1928, acc=0.916
+[Epoch 7/15] loss=0.1918, acc=0.917, lr=5.52e-05
+  Batch 100/1563: loss=0.1836, acc=0.919
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 200/1563: loss=0.1838, acc=0.920
+  Batch 300/1563: loss=0.1857, acc=0.918
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 400/1563: loss=0.1901, acc=0.916
+  Batch 500/1563: loss=0.1891, acc=0.917
+  Batch 600/1563: loss=0.1866, acc=0.918
+  Batch 700/1563: loss=0.1849, acc=0.919
+  Batch 800/1563: loss=0.1820, acc=0.920
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 900/1563: loss=0.1809, acc=0.921
+  Batch 1000/1563: loss=0.1792, acc=0.922
+  Batch 1100/1563: loss=0.1783, acc=0.922
+  Batch 1200/1563: loss=0.1784, acc=0.923
+  Batch 1300/1563: loss=0.1779, acc=0.923
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1400/1563: loss=0.1776, acc=0.923
+  Batch 1500/1563: loss=0.1773, acc=0.923
+[Epoch 8/15] loss=0.1771, acc=0.923, lr=4.48e-05
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 100/1563: loss=0.1816, acc=0.926
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 200/1563: loss=0.1746, acc=0.925
+  Batch 300/1563: loss=0.1700, acc=0.926
+  Batch 400/1563: loss=0.1727, acc=0.925
+  Batch 500/1563: loss=0.1708, acc=0.926
+  Batch 600/1563: loss=0.1691, acc=0.927
+  Batch 700/1563: loss=0.1678, acc=0.927
+  Batch 800/1563: loss=0.1672, acc=0.927
+  Batch 900/1563: loss=0.1672, acc=0.927
+  Batch 1000/1563: loss=0.1682, acc=0.926
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1100/1563: loss=0.1675, acc=0.927
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1200/1563: loss=0.1677, acc=0.927
+  Batch 1300/1563: loss=0.1674, acc=0.928
+  Batch 1400/1563: loss=0.1673, acc=0.928
+  Batch 1500/1563: loss=0.1674, acc=0.928
+[Epoch 9/15] loss=0.1672, acc=0.928, lr=3.45e-05
+  Batch 100/1563: loss=0.1557, acc=0.931
+  Batch 200/1563: loss=0.1640, acc=0.930
+  Batch 300/1563: loss=0.1632, acc=0.931
+  Batch 400/1563: loss=0.1642, acc=0.930
+  Batch 500/1563: loss=0.1646, acc=0.930
+  Batch 600/1563: loss=0.1648, acc=0.930
+  Batch 700/1563: loss=0.1629, acc=0.931
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 800/1563: loss=0.1630, acc=0.931
+  Batch 900/1563: loss=0.1631, acc=0.931
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1000/1563: loss=0.1621, acc=0.932
+  Batch 1100/1563: loss=0.1616, acc=0.932
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1200/1563: loss=0.1604, acc=0.933
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1300/1563: loss=0.1613, acc=0.932
+  Batch 1400/1563: loss=0.1608, acc=0.932
+  Batch 1500/1563: loss=0.1616, acc=0.932
+[Epoch 10/15] loss=0.1608, acc=0.932, lr=2.50e-05
+  Batch 100/1563: loss=0.1529, acc=0.933
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 200/1563: loss=0.1571, acc=0.930
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 300/1563: loss=0.1565, acc=0.930
+  Batch 400/1563: loss=0.1588, acc=0.931
+  Batch 500/1563: loss=0.1578, acc=0.931
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 600/1563: loss=0.1555, acc=0.932
+  Batch 700/1563: loss=0.1557, acc=0.932
+  Batch 800/1563: loss=0.1548, acc=0.932
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 900/1563: loss=0.1550, acc=0.932
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1000/1563: loss=0.1553, acc=0.931
+  Batch 1100/1563: loss=0.1547, acc=0.932
+  Batch 1200/1563: loss=0.1542, acc=0.932
+  Batch 1300/1563: loss=0.1549, acc=0.932
+  Batch 1400/1563: loss=0.1546, acc=0.932
+  Batch 1500/1563: loss=0.1543, acc=0.933
+[Epoch 11/15] loss=0.1543, acc=0.933, lr=1.65e-05
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 100/1563: loss=0.1627, acc=0.931
+  Batch 200/1563: loss=0.1567, acc=0.932
+  Batch 300/1563: loss=0.1610, acc=0.930
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 400/1563: loss=0.1538, acc=0.933
+  Batch 500/1563: loss=0.1522, acc=0.935
+  Batch 600/1563: loss=0.1521, acc=0.935
+  Batch 700/1563: loss=0.1517, acc=0.935
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 800/1563: loss=0.1501, acc=0.935
+  Batch 900/1563: loss=0.1496, acc=0.936
+  Batch 1000/1563: loss=0.1502, acc=0.936
+  Batch 1100/1563: loss=0.1489, acc=0.937
+  Batch 1200/1563: loss=0.1483, acc=0.936
+  Batch 1300/1563: loss=0.1484, acc=0.937
+  Batch 1400/1563: loss=0.1494, acc=0.936
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1500/1563: loss=0.1490, acc=0.936
+[Epoch 12/15] loss=0.1492, acc=0.936, lr=9.55e-06
+  Batch 100/1563: loss=0.1443, acc=0.942
+  Batch 200/1563: loss=0.1470, acc=0.940
+  Batch 300/1563: loss=0.1525, acc=0.936
+  Batch 400/1563: loss=0.1533, acc=0.934
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 500/1563: loss=0.1525, acc=0.934
+  Batch 600/1563: loss=0.1530, acc=0.934
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 700/1563: loss=0.1517, acc=0.935
+  Batch 800/1563: loss=0.1502, acc=0.936
+  Batch 900/1563: loss=0.1487, acc=0.936
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1000/1563: loss=0.1488, acc=0.937
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1100/1563: loss=0.1483, acc=0.937
+  Batch 1200/1563: loss=0.1484, acc=0.937
+  Batch 1300/1563: loss=0.1476, acc=0.937
+  Batch 1400/1563: loss=0.1480, acc=0.937
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1500/1563: loss=0.1480, acc=0.937
+[Epoch 13/15] loss=0.1484, acc=0.937, lr=4.32e-06
+  Batch 100/1563: loss=0.1621, acc=0.932
+  Batch 200/1563: loss=0.1515, acc=0.936
+  Batch 300/1563: loss=0.1476, acc=0.939
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 400/1563: loss=0.1462, acc=0.939
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 500/1563: loss=0.1472, acc=0.938
+  Batch 600/1563: loss=0.1455, acc=0.938
+  Batch 700/1563: loss=0.1450, acc=0.938
+  Batch 800/1563: loss=0.1431, acc=0.939
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 900/1563: loss=0.1432, acc=0.939
+  Batch 1000/1563: loss=0.1437, acc=0.939
+  Batch 1100/1563: loss=0.1438, acc=0.939
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1200/1563: loss=0.1436, acc=0.939
+  Batch 1300/1563: loss=0.1437, acc=0.938
+  Batch 1400/1563: loss=0.1434, acc=0.939
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1500/1563: loss=0.1434, acc=0.939
+[Epoch 14/15] loss=0.1435, acc=0.939, lr=1.09e-06
+  Batch 100/1563: loss=0.1368, acc=0.944
+  Batch 200/1563: loss=0.1413, acc=0.942
+  Batch 300/1563: loss=0.1455, acc=0.938
+  Batch 400/1563: loss=0.1458, acc=0.938
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 500/1563: loss=0.1435, acc=0.939
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 600/1563: loss=0.1431, acc=0.938
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 700/1563: loss=0.1437, acc=0.938
+  Batch 800/1563: loss=0.1436, acc=0.938
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 900/1563: loss=0.1433, acc=0.937
+  Batch 1000/1563: loss=0.1420, acc=0.938
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1100/1563: loss=0.1431, acc=0.938
+  Batch 1200/1563: loss=0.1437, acc=0.938
+  Batch 1300/1563: loss=0.1429, acc=0.938
+  Batch 1400/1563: loss=0.1428, acc=0.938
+  Batch 1500/1563: loss=0.1428, acc=0.938
+[Epoch 15/15] loss=0.1428, acc=0.938, lr=0.00e+00
+
+📊 评估模型性能...
+🔍 评估 1000 个样本...
+✅ 评估完成: 准确率 = 0.975 (1950/2000)
+💾 内容模型已保存到: old_content_siamese_model.pth
+
+============================================================
+🎨 训练风格分离任务
+============================================================
+🚀 开始全数据集字体训练...
+📊 训练配置:
+  - 任务: style
+  - 设备: cuda
+  - 风格数: 200
+  - 内容数: 500
+  - 训练样本: 50000
+  - 批量大小: 32
+  - 训练轮数: 15
+
+📥 加载潜在编码数据...
+[INFO] 缺少文件: chars_path(/scratch/gz2199/Content-Style-Disentangled-Representation-Learning/0/1/0/char_list.txt), fonts_json(/scratch/gz2199/Content-Style-Disentangled-Representation-Learning/0/1/0/lmdb_keys.json)
+[INFO] 使用fallback模式，默认2056字体×4574字符结构...
+[INFO] 使用fallback模式，采用2056字体×4574字符结构...
+[WARNING] 数据量不匹配!
+  - 实际样本: 9406200
+  - 预期样本: 9404144 (2056×4574)
+  - 将按实际数据调整结构...
+  - 调整为: 2056字体 × 4575字符
+[ImprovedLatentAccessor] Fallback模式配置:
+  - 字体数量: 2056
+  - 字符数量: 4575
+  - 数据组织: font_idx * 4575 + char_idx
+
+🔧 加载VAE解码器...
+[INFO] Loaded VAE decoder on cuda
+
+📚 创建训练数据集...
+[INFO] 创建全数据集训练器:
+  - 任务类型: style
+  - 风格数量: 200
+  - 内容数量: 500
+  - 训练样本: 50000
+  - 样本形状: torch.Size([4, 16, 16])
+
+🤖 创建Siamese模型...
+  - 输入通道数: 1
+
+🎯 开始训练...
+  Batch 100/1563: loss=0.7114, acc=0.520
+  Batch 200/1563: loss=0.7085, acc=0.520
+  Batch 300/1563: loss=0.7034, acc=0.526
+  Batch 400/1563: loss=0.6963, acc=0.536
+  Batch 500/1563: loss=0.6837, acc=0.554
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 600/1563: loss=0.6707, acc=0.572
+  Batch 700/1563: loss=0.6574, acc=0.589
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 800/1563: loss=0.6450, acc=0.604
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 900/1563: loss=0.6357, acc=0.614
+  Batch 1000/1563: loss=0.6240, acc=0.627
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1100/1563: loss=0.6135, acc=0.638
+  Batch 1200/1563: loss=0.6038, acc=0.647
+  Batch 1300/1563: loss=0.5958, acc=0.656
+  Batch 1400/1563: loss=0.5870, acc=0.664
+  Batch 1500/1563: loss=0.5800, acc=0.670
+[Epoch 1/15] loss=0.5753, acc=0.674, lr=4.95e-05
+  Batch 100/1563: loss=0.4651, acc=0.766
+  Batch 200/1563: loss=0.4541, acc=0.776
+  Batch 300/1563: loss=0.4493, acc=0.777
+  Batch 400/1563: loss=0.4470, acc=0.778
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 500/1563: loss=0.4419, acc=0.780
+  Batch 600/1563: loss=0.4390, acc=0.782
+  Batch 700/1563: loss=0.4359, acc=0.783
+  Batch 800/1563: loss=0.4304, acc=0.786
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 900/1563: loss=0.4279, acc=0.788
+  Batch 1000/1563: loss=0.4247, acc=0.791
+  Batch 1100/1563: loss=0.4216, acc=0.792
+  Batch 1200/1563: loss=0.4198, acc=0.794
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1300/1563: loss=0.4163, acc=0.795
+  Batch 1400/1563: loss=0.4132, acc=0.797
+  Batch 1500/1563: loss=0.4116, acc=0.798
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+[Epoch 2/15] loss=0.4106, acc=0.798, lr=4.78e-05
+  Batch 100/1563: loss=0.3672, acc=0.824
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 200/1563: loss=0.3660, acc=0.822
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 300/1563: loss=0.3617, acc=0.826
+  Batch 400/1563: loss=0.3614, acc=0.825
+  Batch 500/1563: loss=0.3615, acc=0.825
+  Batch 600/1563: loss=0.3627, acc=0.824
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 700/1563: loss=0.3627, acc=0.825
+  Batch 800/1563: loss=0.3643, acc=0.824
+  Batch 900/1563: loss=0.3621, acc=0.826
+  Batch 1000/1563: loss=0.3594, acc=0.828
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1100/1563: loss=0.3576, acc=0.829
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1200/1563: loss=0.3565, acc=0.829
+  Batch 1300/1563: loss=0.3561, acc=0.830
+  Batch 1400/1563: loss=0.3547, acc=0.830
+  Batch 1500/1563: loss=0.3531, acc=0.831
+[Epoch 3/15] loss=0.3533, acc=0.831, lr=4.52e-05
+  Batch 100/1563: loss=0.3400, acc=0.834
+  Batch 200/1563: loss=0.3291, acc=0.845
+  Batch 300/1563: loss=0.3318, acc=0.843
+  Batch 400/1563: loss=0.3344, acc=0.841
+  Batch 500/1563: loss=0.3348, acc=0.839
+  Batch 600/1563: loss=0.3340, acc=0.840
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 700/1563: loss=0.3300, acc=0.843
+  Batch 800/1563: loss=0.3300, acc=0.844
+  Batch 900/1563: loss=0.3287, acc=0.845
+  Batch 1000/1563: loss=0.3265, acc=0.846
+  Batch 1100/1563: loss=0.3251, acc=0.846
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1200/1563: loss=0.3248, acc=0.847
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1300/1563: loss=0.3243, acc=0.847
+  Batch 1400/1563: loss=0.3221, acc=0.848
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1500/1563: loss=0.3198, acc=0.850
+[Epoch 4/15] loss=0.3193, acc=0.850, lr=4.17e-05
+  Batch 100/1563: loss=0.2953, acc=0.865
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 200/1563: loss=0.3045, acc=0.862
+  Batch 300/1563: loss=0.3014, acc=0.863
+  Batch 400/1563: loss=0.2960, acc=0.865
+  Batch 500/1563: loss=0.2942, acc=0.867
+  Batch 600/1563: loss=0.2925, acc=0.867
+  Batch 700/1563: loss=0.2920, acc=0.868
+  Batch 800/1563: loss=0.2927, acc=0.868
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 900/1563: loss=0.2901, acc=0.869
+  Batch 1000/1563: loss=0.2899, acc=0.868
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1100/1563: loss=0.2874, acc=0.870
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1200/1563: loss=0.2858, acc=0.872
+  Batch 1300/1563: loss=0.2851, acc=0.872
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1400/1563: loss=0.2841, acc=0.872
+  Batch 1500/1563: loss=0.2827, acc=0.873
+[Epoch 5/15] loss=0.2827, acc=0.873, lr=3.75e-05
+  Batch 100/1563: loss=0.2678, acc=0.884
+  Batch 200/1563: loss=0.2763, acc=0.881
+  Batch 300/1563: loss=0.2763, acc=0.877
+  Batch 400/1563: loss=0.2726, acc=0.879
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 500/1563: loss=0.2712, acc=0.880
+  Batch 600/1563: loss=0.2671, acc=0.881
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 700/1563: loss=0.2680, acc=0.881
+  Batch 800/1563: loss=0.2681, acc=0.880
+  Batch 900/1563: loss=0.2676, acc=0.880
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1000/1563: loss=0.2671, acc=0.880
+  Batch 1100/1563: loss=0.2659, acc=0.881
+  Batch 1200/1563: loss=0.2638, acc=0.882
+  Batch 1300/1563: loss=0.2629, acc=0.882
+  Batch 1400/1563: loss=0.2619, acc=0.882
+  Batch 1500/1563: loss=0.2609, acc=0.883
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+[Epoch 6/15] loss=0.2603, acc=0.884, lr=3.27e-05
+  Batch 100/1563: loss=0.2468, acc=0.894
+  Batch 200/1563: loss=0.2414, acc=0.898
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 300/1563: loss=0.2420, acc=0.899
+  Batch 400/1563: loss=0.2382, acc=0.900
+  Batch 500/1563: loss=0.2374, acc=0.899
+  Batch 600/1563: loss=0.2388, acc=0.898
+  Batch 700/1563: loss=0.2392, acc=0.898
+  Batch 800/1563: loss=0.2378, acc=0.898
+  Batch 900/1563: loss=0.2377, acc=0.898
+  Batch 1000/1563: loss=0.2384, acc=0.896
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1100/1563: loss=0.2377, acc=0.897
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1200/1563: loss=0.2386, acc=0.896
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1300/1563: loss=0.2371, acc=0.896
+  Batch 1400/1563: loss=0.2359, acc=0.897
+  Batch 1500/1563: loss=0.2347, acc=0.897
+[Epoch 7/15] loss=0.2345, acc=0.897, lr=2.76e-05
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 100/1563: loss=0.2168, acc=0.903
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 200/1563: loss=0.2215, acc=0.901
+  Batch 300/1563: loss=0.2245, acc=0.901
+  Batch 400/1563: loss=0.2232, acc=0.901
+  Batch 500/1563: loss=0.2196, acc=0.904
+  Batch 600/1563: loss=0.2208, acc=0.904
+  Batch 700/1563: loss=0.2185, acc=0.905
+  Batch 800/1563: loss=0.2194, acc=0.905
+  Batch 900/1563: loss=0.2210, acc=0.905
+  Batch 1000/1563: loss=0.2209, acc=0.905
+  Batch 1100/1563: loss=0.2203, acc=0.905
+  Batch 1200/1563: loss=0.2206, acc=0.904
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1300/1563: loss=0.2209, acc=0.904
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1400/1563: loss=0.2208, acc=0.904
+  Batch 1500/1563: loss=0.2213, acc=0.904
+[Epoch 8/15] loss=0.2201, acc=0.904, lr=2.24e-05
+  Batch 100/1563: loss=0.2057, acc=0.910
+  Batch 200/1563: loss=0.2095, acc=0.909
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 300/1563: loss=0.2138, acc=0.906
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 400/1563: loss=0.2125, acc=0.906
+  Batch 500/1563: loss=0.2114, acc=0.906
+  Batch 600/1563: loss=0.2091, acc=0.908
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 700/1563: loss=0.2091, acc=0.908
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 800/1563: loss=0.2098, acc=0.908
+  Batch 900/1563: loss=0.2085, acc=0.908
+  Batch 1000/1563: loss=0.2078, acc=0.909
+  Batch 1100/1563: loss=0.2070, acc=0.909
+  Batch 1200/1563: loss=0.2081, acc=0.909
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1300/1563: loss=0.2082, acc=0.909
+  Batch 1400/1563: loss=0.2070, acc=0.909
+  Batch 1500/1563: loss=0.2067, acc=0.910
+[Epoch 9/15] loss=0.2062, acc=0.910, lr=1.73e-05
+  Batch 100/1563: loss=0.1893, acc=0.923
+  Batch 200/1563: loss=0.1948, acc=0.917
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 300/1563: loss=0.1955, acc=0.916
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 400/1563: loss=0.1951, acc=0.915
+  Batch 500/1563: loss=0.1982, acc=0.914
+  Batch 600/1563: loss=0.1979, acc=0.913
+  Batch 700/1563: loss=0.1975, acc=0.914
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 800/1563: loss=0.1975, acc=0.914
+  Batch 900/1563: loss=0.1972, acc=0.915
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1000/1563: loss=0.1984, acc=0.914
+  Batch 1100/1563: loss=0.1988, acc=0.914
+  Batch 1200/1563: loss=0.1990, acc=0.914
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1300/1563: loss=0.1983, acc=0.914
+  Batch 1400/1563: loss=0.1979, acc=0.914
+  Batch 1500/1563: loss=0.1973, acc=0.915
+[Epoch 10/15] loss=0.1978, acc=0.914, lr=1.25e-05
+  Batch 100/1563: loss=0.1963, acc=0.912
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 200/1563: loss=0.1906, acc=0.916
+  Batch 300/1563: loss=0.1919, acc=0.917
+  Batch 400/1563: loss=0.1887, acc=0.920
+  Batch 500/1563: loss=0.1882, acc=0.921
+  Batch 600/1563: loss=0.1909, acc=0.918
+  Batch 700/1563: loss=0.1933, acc=0.917
+  Batch 800/1563: loss=0.1920, acc=0.917
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 900/1563: loss=0.1919, acc=0.917
+  Batch 1000/1563: loss=0.1913, acc=0.918
+  Batch 1100/1563: loss=0.1901, acc=0.918
+  Batch 1200/1563: loss=0.1897, acc=0.919
+  Batch 1300/1563: loss=0.1890, acc=0.919
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1400/1563: loss=0.1894, acc=0.919
+  Batch 1500/1563: loss=0.1893, acc=0.919
+[Epoch 11/15] loss=0.1898, acc=0.919, lr=8.27e-06
+  Batch 100/1563: loss=0.1979, acc=0.918
+  Batch 200/1563: loss=0.1989, acc=0.914
+  Batch 300/1563: loss=0.1938, acc=0.917
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 400/1563: loss=0.1929, acc=0.917
+  Batch 500/1563: loss=0.1910, acc=0.917
+  Batch 600/1563: loss=0.1897, acc=0.918
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 700/1563: loss=0.1884, acc=0.918
+  Batch 800/1563: loss=0.1876, acc=0.918
+  Batch 900/1563: loss=0.1875, acc=0.918
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1000/1563: loss=0.1870, acc=0.919
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1100/1563: loss=0.1871, acc=0.919
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1200/1563: loss=0.1876, acc=0.918
+  Batch 1300/1563: loss=0.1867, acc=0.918
+  Batch 1400/1563: loss=0.1858, acc=0.919
+  Batch 1500/1563: loss=0.1856, acc=0.919
+[Epoch 12/15] loss=0.1856, acc=0.919, lr=4.77e-06
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 100/1563: loss=0.1871, acc=0.921
+  Batch 200/1563: loss=0.1803, acc=0.923
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 300/1563: loss=0.1775, acc=0.924
+  Batch 400/1563: loss=0.1790, acc=0.923
+  Batch 500/1563: loss=0.1771, acc=0.923
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 600/1563: loss=0.1767, acc=0.924
+  Batch 700/1563: loss=0.1769, acc=0.924
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 800/1563: loss=0.1759, acc=0.924
+  Batch 900/1563: loss=0.1747, acc=0.925
+  Batch 1000/1563: loss=0.1759, acc=0.924
+  Batch 1100/1563: loss=0.1757, acc=0.924
+  Batch 1200/1563: loss=0.1752, acc=0.925
+  Batch 1300/1563: loss=0.1760, acc=0.925
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1400/1563: loss=0.1765, acc=0.925
+  Batch 1500/1563: loss=0.1766, acc=0.925
+[Epoch 13/15] loss=0.1766, acc=0.925, lr=2.16e-06
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 100/1563: loss=0.1576, acc=0.936
+  Batch 200/1563: loss=0.1743, acc=0.927
+  Batch 300/1563: loss=0.1763, acc=0.925
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 400/1563: loss=0.1784, acc=0.923
+  Batch 500/1563: loss=0.1762, acc=0.925
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 600/1563: loss=0.1714, acc=0.926
+  Batch 700/1563: loss=0.1738, acc=0.925
+  Batch 800/1563: loss=0.1748, acc=0.924
+  Batch 900/1563: loss=0.1756, acc=0.924
+  Batch 1000/1563: loss=0.1760, acc=0.924
+  Batch 1100/1563: loss=0.1761, acc=0.924
+  Batch 1200/1563: loss=0.1763, acc=0.924
+  Batch 1300/1563: loss=0.1769, acc=0.924
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 1400/1563: loss=0.1770, acc=0.924
+  Batch 1500/1563: loss=0.1764, acc=0.924
+[Epoch 14/15] loss=0.1764, acc=0.924, lr=5.46e-07
+[DEBUG] Sample 0: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 0: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 100/1563: loss=0.1992, acc=0.911
+  Batch 200/1563: loss=0.1863, acc=0.917
+  Batch 300/1563: loss=0.1817, acc=0.921
+  Batch 400/1563: loss=0.1807, acc=0.921
+  Batch 500/1563: loss=0.1800, acc=0.922
+  Batch 600/1563: loss=0.1794, acc=0.923
+[DEBUG] Sample 3: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 3: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 700/1563: loss=0.1786, acc=0.923
+[DEBUG] Sample 1: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 1: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 800/1563: loss=0.1783, acc=0.924
+[DEBUG] Sample 4: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 4: ci_sp.shape = torch.Size([1, 128, 128])
+  Batch 900/1563: loss=0.1767, acc=0.924
+  Batch 1000/1563: loss=0.1760, acc=0.925
+  Batch 1100/1563: loss=0.1764, acc=0.925
+  Batch 1200/1563: loss=0.1772, acc=0.924
+  Batch 1300/1563: loss=0.1764, acc=0.925
+  Batch 1400/1563: loss=0.1760, acc=0.925
+  Batch 1500/1563: loss=0.1761, acc=0.925
+[DEBUG] Sample 2: z1.shape = torch.Size([4, 16, 16])
+[DEBUG] Sample 2: ci_sp.shape = torch.Size([1, 128, 128])
+[Epoch 15/15] loss=0.1760, acc=0.926, lr=0.00e+00
+
+📊 评估模型性能...
+🔍 评估 10000 个样本...
+✅ 评估完成: 准确率 = 0.951 (19013/20000)
+💾 风格模型已保存到: old_style_siamese_model.pth
+
+🎉 全数据集训练完成!
+旧版全数据集训练完成!
+结束时间: Tue Oct 14 03:53:34 PM EDT 2025
+最终内存使用:
+               total        used        free      shared  buff/cache   available
+Mem:           377Gi        22Gi       320Gi       178Mi        36Gi       354Gi
+Swap:             0B          0B          0B
+生成的模型文件:
+-rw-r--r--. 1 gz2199 gz2199 18M Oct  8 04:45 1content_siamese_model.pth
+-rw-r--r--. 1 gz2199 gz2199 18M Oct  8 04:46 1style_siamese_model.pth
+-rw-r--r--. 1 gz2199 gz2199 28M Oct  7 13:14 content_siamese_model.pth
+-rw-r--r--. 1 gz2199 gz2199 18M Oct 14 14:05 old_content_siamese_model.pth
+-rw-r--r--. 1 gz2199 gz2199 18M Oct 14 15:53 old_style_siamese_model.pth
+-rw-r--r--. 1 gz2199 gz2199 22M Oct  7 15:21 style_siamese_model.pth
+-rw-r--r--. 1 gz2199 gz2199 26M Oct 14 10:55 vae_best_ckpt.pth

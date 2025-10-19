@@ -1,0 +1,34 @@
+# PyTorch模型检查点文件 (太大，不适合上传到GitHub)
+*.pth
+*.pt
+*.pkl
+*.pickle
+
+# 大型数据文件
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# 日志文件
+*.log
+logs/
+__pycache__/
+*.pyc
+
+# Jupyter Notebook检查点
+.ipynb_checkpoints/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 特定目录
+ckpt/
+checkpoints/
+models/
+data/
+datasets/
+
+# 大于100MB的任何文件
+# (手动添加具体的大文件名)
