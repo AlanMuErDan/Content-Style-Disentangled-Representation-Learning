@@ -1,4 +1,4 @@
-```
+
 # Content–Style Disentangled Representation Learning for Chinese Font Generation
 
 A general, architecture-agnostic representation-learning framework for disentangling Chinese font content and style in latent space. The system supports reconstruction, style transfer, interpolation, and synthesis of unseen font–character combinations.
@@ -48,7 +48,7 @@ python main_train.py   # set train_stage: disentangle_mar / disentangle_sd / dis
 python - <<'PY'
 # load disentangle model + VAE decoder, build cond (Zc+Zs), run scheduler.p_sample_loop, then decode
 PY
-```
+
 
 ---
 
