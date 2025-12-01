@@ -42,3 +42,8 @@ trainer/style_siamese_model_full_enhanced.pth
 trainer/style_siamese_model_full_vgg.pth
 font_latents_v2_full.pt
 font_list_full.json
+font_latents_v2_full.pt
+*.pt
+lmdb_test/
+*.mdb
+logs/
