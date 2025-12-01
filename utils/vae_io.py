@@ -44,8 +44,8 @@ def load_models(
     ).to(device).eval()
 
     ckpt = torch.load(ckpt_path, map_location=device)
-    encoder.load_state_dict(ckpt["encoder"])
-    decoder.load_state_dict(ckpt["decoder"])
+    encoder.load_state_dict(ckpt["encoder"], strict=False)
+    decoder.load_state_dict(ckpt["decoder"], strict=False)
 
     return encoder, decoder, cfg, device
 

@@ -6,7 +6,7 @@ import torch
 import random 
 
 def init_wandb(config):
-    wandb.init(project="font-disentangle-DDPM-week-2", config=config)
+    wandb.init(project="report_experiment_lets_go", config=config)
 
 def log_images(imgA, recA, crossBA, gt_crossBA, imgB, recB, crossAB, gt_crossAB):
     grid = make_grid(

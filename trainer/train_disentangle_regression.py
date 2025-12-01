@@ -35,6 +35,12 @@ from utils.lr_scheduler import (
     Scheduler_LinearWarmup_CosineDecay,
 )
 from utils.ema import LitEma
+from utils.siamese_scores import (
+    load_model as load_siamese_model,
+    score_pair as siamese_score_pair,
+    DEFAULT_CONTENT_CKPT,
+    DEFAULT_STYLE_CKPT,
+)
 
 
 # ---------------------------
@@ -244,6 +250,25 @@ def train_disentangle_regression_loop(cfg: dict):
     if cfg.get("wandb", {}).get("enable", False):
         init_wandb(cfg)
 
+    siamese_cfg = cfg.get("siamese", {})
+    siamese_models = None
+    if siamese_cfg.get("enable", False):
+        siamese_device = torch.device(siamese_cfg.get("device", str(device)))
+        content_ckpt = siamese_cfg.get("content_ckpt") or DEFAULT_CONTENT_CKPT
+        style_ckpt = siamese_cfg.get("style_ckpt") or DEFAULT_STYLE_CKPT
+        encoder_type = siamese_cfg.get("encoder_type", "enhanced")
+
+        content_model = load_siamese_model(content_ckpt, "content", siamese_device, encoder_type)
+        style_model = load_siamese_model(style_ckpt, "style", siamese_device, encoder_type)
+
+        siamese_models = {
+            "content": content_model,
+            "style": style_model,
+            "device": siamese_device,
+            "log_table": bool(siamese_cfg.get("log_table", False)),
+        }
+        print("Loaded Siamese evaluators for content/style scoring.")
+
     # Train
     step = 0
     for epoch in range(int(cfg["train"]["epochs"])):
@@ -334,6 +359,7 @@ def train_disentangle_regression_loop(cfg: dict):
                 step, train_batch, encoder, regressor,
                 decoder_vae, vae_cfg, denorm, device,
                 name="train/quad_grid", use_encoder=use_encoder,
+                siamese_models=siamese_models,
             )
 
             # restore
@@ -376,6 +402,7 @@ def train_disentangle_regression_loop(cfg: dict):
                         step, vis_batch, encoder, regressor,
                         decoder_vae, vae_cfg, denorm, device,
                         name="val/quad_grid", use_encoder=use_encoder,
+                        siamese_models=siamese_models,
                     )
 
                     # restore
@@ -432,7 +459,8 @@ def evaluate(loader, encoder, regressor, device, use_encoder: bool = True):
 def log_sample_images(
     step, batch, encoder, regressor,
     decoder, vae_cfg, denorm, device,
-    name: str, use_encoder: bool = True, num_show: int = 4
+    name: str, use_encoder: bool = True, num_show: int = 4,
+    siamese_models: dict = None,
 ):
     import wandb
     to_tensor = transforms.ToTensor()
@@ -488,6 +516,46 @@ def log_sample_images(
 
     grid = make_grid(torch.stack(rows), nrow=1, padding=2)
     wandb.log({name: wandb.Image(grid)}, step=step)
+
+    if not siamese_models or wandb.run is None:
+        return
+
+    img_fa_ca = torch.stack(img_fa_ca)
+    img_fb_cb = torch.stack(img_fb_cb)
+    img_gen_fa_cb = torch.stack(img_gen_fa_cb)
+    img_gen_fb_ca = torch.stack(img_gen_fb_ca)
+
+    content_model = siamese_models["content"]
+    style_model = siamese_models["style"]
+    siamese_device = siamese_models.get("device", device)
+
+    def batch_scores(preds, content_refs, style_refs):
+        content_scores = []
+        style_scores = []
+        for pred, c_ref, s_ref in zip(preds, content_refs, style_refs):
+            content_scores.append(siamese_score_pair(content_model, pred, c_ref, siamese_device))
+            style_scores.append(siamese_score_pair(style_model, pred, s_ref, siamese_device))
+        return content_scores, style_scores
+
+    fb_content_scores, fb_style_scores = batch_scores(
+        img_gen_fb_ca, img_fa_ca, img_fb_cb
+    )
+    fa_content_scores, fa_style_scores = batch_scores(
+        img_gen_fa_cb, img_fb_cb, img_fa_ca
+    )
+
+    def avg(values):
+        return float(sum(values) / max(len(values), 1)) if values else 0.0
+
+    wandb.log(
+        {
+            f"{name}/fb_ca_content_score": avg(fb_content_scores),
+            f"{name}/fb_ca_style_score": avg(fb_style_scores),
+            f"{name}/fa_cb_content_score": avg(fa_content_scores),
+            f"{name}/fa_cb_style_score": avg(fa_style_scores),
+        },
+        step=step,
+    )
 
 
 def save_ckpt(

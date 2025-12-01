@@ -23,13 +23,13 @@ from utils.save_ckpt import build_state_dict  # kept for compatibility (unused b
 CONFIG_PATH     = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/config.yaml"
 CKPT_PATH       = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/vae_best_ckpt.pth"
 SRC_LMDB_PATH   = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_data.lmdb"
-OUT_LMDB_PATH   = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_v2_temp.lmdb"
-OUT_PT_PATH     = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_v2.pt"
-CHAR_LIST_PATH  = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/intersection_chars.txt"
+OUT_LMDB_PATH   = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_5_stroke.lmdb"
+OUT_PT_PATH     = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_5_stroke.pt"
+CHAR_LIST_PATH  = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/stroke_5_chars.txt"
 CACHE_PATH      = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/lmdb_keys.json"
 
 BATCH_SIZE      = 64
-OUTPUT_MODE     = "lmdb"   # "lmdb" or "pt" (can be overridden by --mode)
+OUTPUT_MODE     = "pt"   # "lmdb" or "pt" (can be overridden by --mode)
 
 # =========================
 # Utils

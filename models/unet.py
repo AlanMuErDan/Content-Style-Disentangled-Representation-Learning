@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from .unet_utils import (
     checkpoint,
     conv_nd,
@@ -14,6 +15,7 @@ from .unet_utils import (
     timestep_embedding,
 )
 from .unet_utils import SpatialTransformer
+from .mlp import TimestepEmbedder
 
 
 class TimestepBlock(nn.Module):
@@ -369,6 +371,57 @@ class ContentStyleToTokens(nn.Module):
         return torch.zeros(B, self.cfg.n_content_tokens + self.cfg.n_style_tokens, self.cfg.ctx_dim, device=device)
 
 
+class PatchTokenAdapter(nn.Module):
+    """
+    Shared helper that converts spatial content/style maps into patch tokens and
+    provides null-context embeddings for classifier-free guidance.
+    """
+    def __init__(
+        self,
+        sample_size: int,
+        content_channels: int,
+        style_channels: int,
+        patch_size: int,
+        ctx_dim: int,
+        use_learned_null: bool,
+    ):
+        super().__init__()
+        assert sample_size % patch_size == 0, "sample_size must be divisible by patch_size"
+        self.sample_size = sample_size
+        self.patch_size = patch_size
+        self.content_channels = content_channels
+        self.style_channels = style_channels
+        self.ctx_dim = ctx_dim
+
+        tokens_per_field = (sample_size // patch_size) ** 2
+        self.total_tokens = tokens_per_field * 2
+
+        self.content_proj = nn.Linear(content_channels * patch_size * patch_size, ctx_dim)
+        self.style_proj = nn.Linear(style_channels * patch_size * patch_size, ctx_dim)
+
+        if use_learned_null:
+            self.null_tokens = nn.Parameter(torch.zeros(1, self.total_tokens, ctx_dim))
+        else:
+            self.register_buffer(
+                "null_tokens", torch.zeros(1, self.total_tokens, ctx_dim), persistent=False
+            )
+
+    def _patchify(self, feat: torch.Tensor) -> torch.Tensor:
+        B, C, H, W = feat.shape
+        p = self.patch_size
+        feat = feat.view(B, C, H // p, p, W // p, p)
+        feat = feat.permute(0, 2, 4, 3, 5, 1).reshape(B, -1, C * p * p)
+        return feat
+
+    def build_tokens(self, content_map: torch.Tensor, style_map: torch.Tensor) -> torch.Tensor:
+        content_tokens = self.content_proj(self._patchify(content_map))
+        style_tokens = self.style_proj(self._patchify(style_map))
+        return torch.cat([content_tokens, style_tokens], dim=1)
+
+    def get_null_tokens(self, batch_size: int, device) -> torch.Tensor:
+        return self.null_tokens.expand(batch_size, -1, -1).to(device)
+
+
 class CSUNetDenoiser(nn.Module):
     """
     Wrapper around the official-style UNetModel:
@@ -386,14 +439,18 @@ class CSUNetDenoiser(nn.Module):
         num_res_blocks: int = 2,
         num_heads: int = 8,
         cs_cfg: Optional[CSCondCfg] = None,
+        attention_resolutions: Optional[Tuple[int, ...]] = None,
     ):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.cs_cfg = cs_cfg or CSCondCfg()
 
-        # Attention at all spatial scales for 16x16: ds in {1,2,4} -> sizes 16,8,4
-        attention_resolutions = (1, 2, 4)
+        # If not specified, only keep the lowest-resolution attention to cut compute.
+        if attention_resolutions is None:
+            # Downsample rate after the deepest block is 2 ** (len(channel_mult) - 1)
+            lowest_ds = 2 ** max(len(channel_mult) - 1, 0)
+            attention_resolutions = (lowest_ds,)
 
         self.unet = UNetModel(
             image_size=sample_size,
@@ -437,6 +494,416 @@ class CSUNetDenoiser(nn.Module):
         eps_cond   = self.unet(x, timesteps=t, context=ctx_cond)
         return eps_uncond + cfg_scale * (eps_cond - eps_uncond)
 
+    @torch.no_grad()
+    def debug_shapes(self, x: torch.Tensor, t: torch.Tensor, c: torch.Tensor) -> None:
+        content, style = self._split_c(c)
+        ctx = self.cs_tokens.to_tokens(content, style)
+        print("[SANITY] CSUNetDenoiser")
+        print("  input:", tuple(x.shape))
+        print("  content split:", tuple(content.shape))
+        print("  style split:", tuple(style.shape))
+        print("  ctx tokens:", tuple(ctx.shape))
+
+        unet = self.unet
+        hs = []
+        t_emb = timestep_embedding(t, unet.model_channels, repeat_only=False)
+        emb = unet.time_embed(t_emb)
+        print("  time embedding:", tuple(emb.shape))
+
+        h = x
+        for idx, module in enumerate(unet.input_blocks):
+            h = module(h, emb, ctx)
+            hs.append(h)
+            print(f"  input_block[{idx}]:", tuple(h.shape))
+
+        h = unet.middle_block(h, emb, ctx)
+        print("  middle_block:", tuple(h.shape))
+
+        for idx, module in enumerate(unet.output_blocks):
+            skip = hs.pop()
+            h = torch.cat([h, skip], dim=1)
+            print(f"  output_block[{idx}] concat:", tuple(h.shape))
+            h = module(h, emb, ctx)
+            print(f"  output_block[{idx}] out:", tuple(h.shape))
+
+        out = unet.out(h)
+        print("  final output:", tuple(out.shape))
+
+
+
+class CSPatchUNetDenoiser(nn.Module):
+    """
+    UNet wrapper that consumes patch tokens produced from spatial content/style maps.
+    The interface expects the trainer to pass pre-built tokens, but exposes helpers to
+    convert 16x16 feature maps into (B, N_tokens, ctx_dim) sequences.
+    """
+    def __init__(
+        self,
+        sample_size: int = 16,
+        in_channels: int = 4,
+        out_channels: int = 4,
+        base_channels: int = 256,
+        channel_mult: Tuple[int, ...] = (1, 2, 2),
+        num_res_blocks: int = 2,
+        num_heads: int = 8,
+        ctx_dim: int = 128,
+        content_channels: int = 4,
+        style_channels: int = 4,
+        patch_size: int = 2,
+        use_learned_null: bool = True,
+    ):
+        super().__init__()
+        assert sample_size % patch_size == 0, "sample_size must be divisible by patch_size"
+        self.patch_size = patch_size
+        self.ctx_dim = ctx_dim
+        self.content_channels = content_channels
+        self.style_channels = style_channels
+
+        self.n_content_tokens = (sample_size // patch_size) ** 2
+        self.n_style_tokens = self.n_content_tokens
+        self.total_tokens = self.n_content_tokens + self.n_style_tokens
+
+        self.unet = UNetModel(
+            image_size=sample_size,
+            in_channels=in_channels,
+            model_channels=base_channels,
+            out_channels=out_channels,
+            num_res_blocks=num_res_blocks,
+            attention_resolutions=(1, 2, 4),
+            dropout=0.0,
+            channel_mult=channel_mult,
+            conv_resample=True,
+            dims=2,
+            use_checkpoint=False,
+            num_heads=num_heads,
+            num_head_channels=-1,
+            use_scale_shift_norm=True,
+            resblock_updown=False,
+            use_spatial_transformer=True,
+            transformer_depth=1,
+            context_dim=ctx_dim,
+            legacy=True,
+        )
+
+        token_dim_c = content_channels * patch_size * patch_size
+        token_dim_s = style_channels * patch_size * patch_size
+        self.content_proj = nn.Linear(token_dim_c, ctx_dim)
+        self.style_proj = nn.Linear(token_dim_s, ctx_dim)
+
+        if use_learned_null:
+            self.null_tokens = nn.Parameter(torch.zeros(1, self.total_tokens, ctx_dim))
+        else:
+            self.register_buffer("null_tokens", torch.zeros(1, self.total_tokens, ctx_dim), persistent=False)
+
+    def _patchify(self, feat: torch.Tensor) -> torch.Tensor:
+        B, C, H, W = feat.shape
+        p = self.patch_size
+        feat = feat.view(B, C, H // p, p, W // p, p)
+        feat = feat.permute(0, 2, 4, 3, 5, 1).reshape(B, -1, C * p * p)
+        return feat
+
+    def build_tokens(self, content_map: torch.Tensor, style_map: torch.Tensor) -> torch.Tensor:
+        content_tokens = self.content_proj(self._patchify(content_map))
+        style_tokens = self.style_proj(self._patchify(style_map))
+        return torch.cat([content_tokens, style_tokens], dim=1)
+
+    def get_null_tokens(self, batch_size: int, device) -> torch.Tensor:
+        return self.null_tokens.expand(batch_size, -1, -1).to(device)
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor, tokens: torch.Tensor) -> torch.Tensor:
+        return self.unet(x, timesteps=t, context=tokens)
+
+    @torch.no_grad()
+    def forward_with_cfg(self, x: torch.Tensor, t: torch.Tensor, tokens: torch.Tensor, cfg_scale: float) -> torch.Tensor:
+        B = x.size(0)
+        tokens_null = self.get_null_tokens(B, x.device)
+        eps_uncond = self.unet(x, timesteps=t, context=tokens_null)
+        eps_cond = self.unet(x, timesteps=t, context=tokens)
+        return eps_uncond + cfg_scale * (eps_cond - eps_uncond)
+
+    @torch.no_grad()
+    def debug_shapes(self, x: torch.Tensor, t: torch.Tensor, tokens: torch.Tensor) -> None:
+        print("[SANITY] CSPatchUNetDenoiser")
+        print("  input:", tuple(x.shape))
+        print("  tokens:", tuple(tokens.shape))
+        unet = self.unet
+        hs = []
+        t_emb = timestep_embedding(t, unet.model_channels, repeat_only=False)
+        emb = unet.time_embed(t_emb)
+        print("  time embedding:", tuple(emb.shape))
+
+        h = x
+        for idx, module in enumerate(unet.input_blocks):
+            h = module(h, emb, tokens)
+            hs.append(h)
+            print(f"  input_block[{idx}]:", tuple(h.shape))
+
+        h = unet.middle_block(h, emb, tokens)
+        print("  middle_block:", tuple(h.shape))
+
+        for idx, module in enumerate(unet.output_blocks):
+            skip = hs.pop()
+            h = torch.cat([h, skip], dim=1)
+            print(f"  output_block[{idx}] concat:", tuple(h.shape))
+            h = module(h, emb, tokens)
+            print(f"  output_block[{idx}] out:", tuple(h.shape))
+
+        out = unet.out(h)
+        print("  final output:", tuple(out.shape))
+
+
+def _make_group_norm(channels: int) -> nn.GroupNorm:
+    num_groups = min(32, channels)
+    while channels % num_groups != 0 and num_groups > 1:
+        num_groups -= 1
+    return nn.GroupNorm(num_groups, channels)
+
+
+class TimeResBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, time_dim: int):
+        super().__init__()
+        self.norm1 = _make_group_norm(in_channels)
+        self.act = nn.SiLU()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+
+        self.time_proj = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(time_dim, out_channels),
+        )
+
+        self.norm2 = _make_group_norm(out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.skip = nn.Conv2d(in_channels, out_channels, kernel_size=1) if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x: torch.Tensor, t_emb: torch.Tensor) -> torch.Tensor:
+        h = self.conv1(self.act(self.norm1(x)))
+        temb = self.time_proj(t_emb).unsqueeze(-1).unsqueeze(-1)
+        h = h + temb
+        h = self.conv2(self.act(self.norm2(h)))
+        return h + self.skip(x)
+
+
+class SimplePatchUNetDenoiser(nn.Module):
+    """
+    Lightweight UNet with a single down/up pair and cross-attention only in the bottleneck.
+    Designed for small 16x16 latents.
+    """
+    def __init__(
+        self,
+        sample_size: int = 16,
+        in_channels: int = 4,
+        out_channels: int = 4,
+        base_channels: int = 160,
+        channel_mult: Tuple[int, ...] = (1, 2),
+        num_heads: int = 4,
+        ctx_dim: int = 96,
+        content_channels: int = 4,
+        style_channels: int = 4,
+        patch_size: int = 4,
+        use_learned_null: bool = True,
+    ):
+        super().__init__()
+        assert len(channel_mult) >= 2, "channel_mult must provide at least two entries"
+
+        mid_mult = channel_mult[-1]
+        mid_channels = base_channels * mid_mult
+        assert mid_channels % num_heads == 0, "mid_channels must be divisible by num_heads"
+
+        time_dim = base_channels * 4
+        self.time_embed = TimestepEmbedder(time_dim)
+        self.time_mlp = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(time_dim, time_dim),
+        )
+
+        self.input_proj = nn.Conv2d(in_channels, base_channels, kernel_size=3, padding=1)
+        self.in_block = TimeResBlock(base_channels, base_channels, time_dim)
+
+        self.downsample = nn.Conv2d(base_channels, mid_channels, kernel_size=3, stride=2, padding=1)
+        self.down_block = TimeResBlock(mid_channels, mid_channels, time_dim)
+        self.mid_block1 = TimeResBlock(mid_channels, mid_channels, time_dim)
+        self.cross_attn = SpatialTransformer(
+            mid_channels,
+            num_heads,
+            mid_channels // num_heads,
+            depth=1,
+            context_dim=ctx_dim,
+        )
+        self.mid_block2 = TimeResBlock(mid_channels, mid_channels, time_dim)
+
+        self.up_proj = nn.Conv2d(mid_channels, base_channels, kernel_size=3, padding=1)
+        self.up_block = TimeResBlock(base_channels + base_channels, base_channels, time_dim)
+        self.final_norm = _make_group_norm(base_channels)
+        self.final_act = nn.SiLU()
+        self.final_conv = nn.Conv2d(base_channels, out_channels, kernel_size=3, padding=1)
+
+        self.token_adapter = PatchTokenAdapter(
+            sample_size=sample_size,
+            content_channels=content_channels,
+            style_channels=style_channels,
+            patch_size=patch_size,
+            ctx_dim=ctx_dim,
+            use_learned_null=use_learned_null,
+        )
+
+    def build_tokens(self, content_map: torch.Tensor, style_map: torch.Tensor) -> torch.Tensor:
+        return self.token_adapter.build_tokens(content_map, style_map)
+
+    def get_null_tokens(self, batch_size: int, device) -> torch.Tensor:
+        return self.token_adapter.get_null_tokens(batch_size, device)
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor, tokens: torch.Tensor) -> torch.Tensor:
+        t_emb = self.time_embed(t)
+        t_emb = self.time_mlp(t_emb)
+
+        h = self.input_proj(x)
+        h = self.in_block(h, t_emb)
+        skip = h
+
+        h = self.downsample(h)
+        h = self.down_block(h, t_emb)
+        h = self.mid_block1(h, t_emb)
+        h = self.cross_attn(h, context=tokens)
+        h = self.mid_block2(h, t_emb)
+
+        h = F.interpolate(h, scale_factor=2, mode="nearest")
+        h = self.up_proj(h)
+        h = torch.cat([h, skip], dim=1)
+        h = self.up_block(h, t_emb)
+
+        h = self.final_conv(self.final_act(self.final_norm(h)))
+        return h
+
+    @torch.no_grad()
+    def forward_with_cfg(self, x: torch.Tensor, t: torch.Tensor, tokens: torch.Tensor, cfg_scale: float) -> torch.Tensor:
+        B = x.size(0)
+        tokens_null = self.get_null_tokens(B, x.device)
+        eps_uncond = self.forward(x, t, tokens_null)
+        eps_cond = self.forward(x, t, tokens)
+        return eps_uncond + cfg_scale * (eps_cond - eps_uncond)
+
+    @torch.no_grad()
+    def debug_shapes(self, x: torch.Tensor, t: torch.Tensor, tokens: torch.Tensor) -> None:
+        print("[SANITY] SimplePatchUNetDenoiser")
+        print("  input:", tuple(x.shape))
+        print("  tokens:", tuple(tokens.shape))
+        t_emb = self.time_embed(t)
+        print("  time_embed:", tuple(t_emb.shape))
+        t_emb = self.time_mlp(t_emb)
+        h = self.input_proj(x)
+        print("  after input_proj:", tuple(h.shape))
+        h = self.in_block(h, t_emb)
+        print("  after in_block:", tuple(h.shape))
+        skip = h
+        h = self.downsample(h)
+        print("  after downsample:", tuple(h.shape))
+        h = self.down_block(h, t_emb)
+        print("  after down_block:", tuple(h.shape))
+        h = self.mid_block1(h, t_emb)
+        print("  mid_block1:", tuple(h.shape))
+        h = self.cross_attn(h, context=tokens)
+        print("  after cross_attn:", tuple(h.shape))
+        h = self.mid_block2(h, t_emb)
+        print("  mid_block2:", tuple(h.shape))
+        h = F.interpolate(h, scale_factor=2, mode="nearest")
+        print("  after upsample:", tuple(h.shape))
+        h = self.up_proj(h)
+        print("  after up_proj:", tuple(h.shape))
+        h = torch.cat([h, skip], dim=1)
+        print("  concat skip:", tuple(h.shape))
+        h = self.up_block(h, t_emb)
+        print("  after up_block:", tuple(h.shape))
+        h = self.final_conv(self.final_act(self.final_norm(h)))
+        print("  output:", tuple(h.shape))
+
+
+class LightCSUNetDenoiser(nn.Module):
+    """
+    Lightweight single-down/up UNet that uses content/style tokens (not patch tokens).
+    Designed to mimic SimplePatchUNet speed while staying compatible with CSCondCfg.
+    """
+    def __init__(
+        self,
+        sample_size: int = 16,
+        in_channels: int = 4,
+        out_channels: int = 4,
+        base_channels: int = 160,
+        num_heads: int = 4,
+        cs_cfg: Optional[CSCondCfg] = None,
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.cs_cfg = cs_cfg or CSCondCfg()
+
+        mid_channels = base_channels * 2
+        assert mid_channels % num_heads == 0, "mid_channels must be divisible by num_heads"
+
+        time_dim = base_channels * 4
+        self.time_embed = TimestepEmbedder(time_dim)
+        self.time_mlp = nn.Sequential(nn.SiLU(), nn.Linear(time_dim, time_dim))
+
+        self.cs_tokens = ContentStyleToTokens(self.cs_cfg)
+
+        self.input_proj = nn.Conv2d(in_channels, base_channels, kernel_size=3, padding=1)
+        self.in_block = TimeResBlock(base_channels, base_channels, time_dim)
+
+        self.downsample = nn.Conv2d(base_channels, mid_channels, kernel_size=3, stride=2, padding=1)
+        self.down_block = TimeResBlock(mid_channels, mid_channels, time_dim)
+        self.mid_block1 = TimeResBlock(mid_channels, mid_channels, time_dim)
+        self.cross_attn = SpatialTransformer(
+            mid_channels,
+            num_heads,
+            mid_channels // num_heads,
+            depth=1,
+            context_dim=self.cs_cfg.ctx_dim,
+        )
+        self.mid_block2 = TimeResBlock(mid_channels, mid_channels, time_dim)
+
+        self.up_proj = nn.Conv2d(mid_channels, base_channels, kernel_size=3, padding=1)
+        self.up_block = TimeResBlock(base_channels + base_channels, base_channels, time_dim)
+        self.final_norm = _make_group_norm(base_channels)
+        self.final_act = nn.SiLU()
+        self.final_conv = nn.Conv2d(base_channels, out_channels, kernel_size=3, padding=1)
+
+    def _split_c(self, c: torch.Tensor):
+        return c[:, :self.cs_cfg.content_dim], c[:, self.cs_cfg.content_dim:]
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+        content, style = self._split_c(c)
+        tokens = self.cs_tokens.to_tokens(content, style)
+        return self._forward_with_tokens(x, t, tokens)
+
+    def _forward_with_tokens(self, x: torch.Tensor, t: torch.Tensor, tokens: torch.Tensor) -> torch.Tensor:
+        t_emb = self.time_embed(t)
+        t_emb = self.time_mlp(t_emb)
+
+        h = self.input_proj(x)
+        h = self.in_block(h, t_emb)
+        skip = h
+
+        h = self.downsample(h)
+        h = self.down_block(h, t_emb)
+        h = self.mid_block1(h, t_emb)
+        h = self.cross_attn(h, context=tokens)
+        h = self.mid_block2(h, t_emb)
+
+        h = F.interpolate(h, scale_factor=2, mode="nearest")
+        h = self.up_proj(h)
+        h = torch.cat([h, skip], dim=1)
+        h = self.up_block(h, t_emb)
+
+        return self.final_conv(self.final_act(self.final_norm(h)))
+
+    @torch.no_grad()
+    def forward_with_cfg(self, x: torch.Tensor, t: torch.Tensor, c: torch.Tensor, cfg_scale: float) -> torch.Tensor:
+        B = x.size(0)
+        content, style = self._split_c(c)
+        tokens = self.cs_tokens.to_tokens(content, style)
+        tokens_null = self.cs_tokens.null_tokens(B, x.device)
+        eps_uncond = self._forward_with_tokens(x, t, tokens_null)
+        eps_cond = self._forward_with_tokens(x, t, tokens)
+        return eps_uncond + cfg_scale * (eps_cond - eps_uncond)
 
 
 # === Append this to the end of models/unet.py ===

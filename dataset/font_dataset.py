@@ -226,6 +226,7 @@ class FourWayFontPairLatentPTDataset(Dataset):
 
         self.common_chars = list(self.chars)  
         self._active_font_indices = list(range(self.n))
+        self._active_char_indices = list(range(self.m))
 
         self.max_retry = max_retry
         self.pair_num = pair_num
@@ -233,22 +234,43 @@ class FourWayFontPairLatentPTDataset(Dataset):
         print(f"[PTDataset] Loaded latents from {pt_path} with shape {tuple(self.latents_hwc.shape)}")
         print(f"[PTDataset] m(chars)={self.m}, n(fonts)={self.n} | total={self.m*self.n}")
 
+        self._holdout_quads = None
+        self._holdout_mode = None
+        self._holdout_list = None
+
     def __len__(self):
         return int(self.pair_num)
 
     def __getitem__(self, idx):
-        if len(self._active_font_indices) < 2 or len(self.common_chars) < 2:
+        if len(self._active_font_indices) < 2 or len(self._active_char_indices) < 2:
             raise RuntimeError("Not enough fonts or chars to sample a 4-way pair.")
 
         for _ in range(self.max_retry):
-            fi_a, fi_b = random.sample(self._active_font_indices, 2)
-            ci_a, ci_b = random.sample(range(self.m), 2)
+            if self._holdout_mode == "only" and self._holdout_quads:
+                quad = random.choice(self._holdout_list)
+                fi_a, fi_b, ci_a, ci_b = quad[0], quad[1], quad[2], quad[3]
+                if random.random() < 0.5:
+                    fi_a, fi_b = fi_b, fi_a
+                if random.random() < 0.5:
+                    ci_a, ci_b = ci_b, ci_a
+            else:
+                fi_a, fi_b = random.sample(self._active_font_indices, 2)
+                ci_a, ci_b = random.sample(self._active_char_indices, 2)
 
             # compute flat indices
             idx_fa_ca = self._flat_index(fi_a, ci_a)
             idx_fa_cb = self._flat_index(fi_a, ci_b)
             idx_fb_ca = self._flat_index(fi_b, ci_a)
             idx_fb_cb = self._flat_index(fi_b, ci_b)
+
+            if self._holdout_quads is not None and self._holdout_mode == "exclude":
+                quad_key = self._quad_key(fi_a, fi_b, ci_a, ci_b)
+                if quad_key in self._holdout_quads:
+                    continue
+            elif self._holdout_quads is not None and self._holdout_mode == "only":
+                quad_key = self._quad_key(fi_a, fi_b, ci_a, ci_b)
+                if quad_key not in self._holdout_quads:
+                    continue
 
             # slice and convert to (C,H,W)
             z_fa_ca = self._get_chw(idx_fa_ca)
@@ -264,15 +286,20 @@ class FourWayFontPairLatentPTDataset(Dataset):
                 z_fb_cb = (z_fb_cb - self.mean) / self.std
 
             return {
-                "F_A+C_A": z_fa_ca,
-                "F_A+C_B": z_fa_cb,
-                "F_B+C_A": z_fb_ca,
-                "F_B+C_B": z_fb_cb,
-                "font_a": self.fonts[fi_a],
-                "font_b": self.fonts[fi_b],
-                "char_a": self.chars[ci_a],
-                "char_b": self.chars[ci_b],
-            }
+                    "F_A+C_A": z_fa_ca,
+                    "F_A+C_B": z_fa_cb,
+                    "F_B+C_A": z_fb_ca,
+                    "F_B+C_B": z_fb_cb,
+                    "font_a": self.fonts[fi_a],
+                    "font_b": self.fonts[fi_b],
+                    "char_a": self.chars[ci_a],
+                    "char_b": self.chars[ci_b],
+                    "font_id_a": fi_a,
+                    "font_id_b": fi_b,
+                    "char_id_a": ci_a,
+                    "char_id_b": ci_b,
+                }
+
 
         raise RuntimeError("Unable to sample a valid 4-way latent pair after max_retry attempts.")
 
@@ -287,6 +314,11 @@ class FourWayFontPairLatentPTDataset(Dataset):
             z_chw = z_chw.view(*self.latent_shape)
         return z_chw
 
+    def _quad_key(self, font_idx_a: int, font_idx_b: int, char_idx_a: int, char_idx_b: int):
+        fonts = tuple(sorted((font_idx_a, font_idx_b)))
+        chars = tuple(sorted((char_idx_a, char_idx_b)))
+        return fonts + chars
+
     def denorm(self, z: torch.Tensor) -> torch.Tensor:
         if self.mean is None:
             return z
@@ -300,6 +332,39 @@ class FourWayFontPairLatentPTDataset(Dataset):
         """Optionally restrict the active font subset to allowed_fonts."""
         self._active_font_indices = [i for i, f in enumerate(self.fonts) if f in allowed_fonts]
         assert len(self._active_font_indices) > 1, "Filtered dataset not enough fonts"
+    
+    def apply_char_filter(self, allowed_chars: set):
+        allowed = set(allowed_chars)
+        self._active_char_indices = [i for i, ch in enumerate(self.chars) if ch in allowed]
+        assert len(self._active_char_indices) > 1, "Filtered dataset not enough chars"
+
+    @property
+    def active_font_indices(self):
+        return list(self._active_font_indices)
+
+    @property
+    def active_char_indices(self):
+        return list(self._active_char_indices)
+
+    def make_quad_key(self, font_idx_a: int, font_idx_b: int, char_idx_a: int, char_idx_b: int):
+        return self._quad_key(font_idx_a, font_idx_b, char_idx_a, char_idx_b)
+
+    def set_holdout_quads(self, quads, mode: str = "exclude"):
+        if not quads:
+            self._holdout_quads = None
+            self._holdout_mode = None
+            self._holdout_list = None
+            return
+        normalized = {self._quad_key(*quad) for quad in quads}
+        mode = mode.lower()
+        if mode not in {"exclude", "only"}:
+            raise ValueError(f"Unsupported holdout mode: {mode}")
+        self._holdout_quads = normalized
+        self._holdout_mode = mode
+        if mode == "only":
+            self._holdout_list = list(normalized)
+        else:
+            self._holdout_list = None
 
 
 
@@ -315,6 +380,14 @@ def split_fonts(json_path: str,
     valid_fonts = set(fonts[n_train:])
     return train_fonts, valid_fonts
 
+def split_chars(chars_path, train_ratio=0.9, seed=42):
+    with open(chars_path, "r", encoding="utf-8") as f:
+        chars = [ch.strip() for ch in f if ch.strip()]
+    random.Random(seed).shuffle(chars)
+    n_train = int(len(chars) * train_ratio)
+    return set(chars[:n_train]), set(chars[n_train:])
+
+
 def filter_dataset_fonts(ds, allowed_fonts: set) -> None:
     # PT path (preferred, keeps internal _active_font_indices in sync)
     if hasattr(ds, "apply_font_filter") and callable(getattr(ds, "apply_font_filter")):
@@ -329,3 +402,48 @@ def filter_dataset_fonts(ds, allowed_fonts: set) -> None:
         set.intersection(*(set(ds.data[f].keys()) for f in ds.fonts))
     )
     assert len(ds.common_chars) >= 2, "not enough characters after filtering"
+
+
+def sample_holdout_quads(
+    ds: FourWayFontPairLatentPTDataset,
+    *,
+    count: Optional[int] = None,
+    ratio: float = 0.05,
+    seed: int = 1234,
+) -> set:
+    """Sample unique font/font + char/char combinations to hold out."""
+    fonts = ds.active_font_indices
+    chars = ds.active_char_indices
+
+    if len(fonts) < 2 or len(chars) < 2:
+        return set()
+
+    total_font_pairs = math.comb(len(fonts), 2)
+    total_char_pairs = math.comb(len(chars), 2)
+    total_quads = total_font_pairs * total_char_pairs
+
+    if total_quads == 0:
+        return set()
+
+    if count is None:
+        count = max(1, int(total_quads * ratio))
+
+    count = max(0, min(count, total_quads))
+    if count == 0:
+        return set()
+
+    rng = random.Random(seed)
+    holdout = set()
+    attempts = 0
+    max_attempts = max(1000, count * 20)
+
+    while len(holdout) < count and attempts < max_attempts:
+        fi_a, fi_b = rng.sample(fonts, 2)
+        ci_a, ci_b = rng.sample(chars, 2)
+        holdout.add(ds.make_quad_key(fi_a, fi_b, ci_a, ci_b))
+        attempts += 1
+
+    if len(holdout) < count:
+        print(f"[WARN] Requested {count} holdout combos but generated {len(holdout)}.")
+
+    return holdout

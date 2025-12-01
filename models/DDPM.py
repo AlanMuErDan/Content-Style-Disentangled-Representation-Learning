@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 """
 参考文章: 
 https://zhuanlan.zhihu.com/p/563661713 
@@ -23,10 +24,6 @@ def cosine_beta_schedule(timesteps: int, s: float = 0.008):
 
 
 class GaussianDiffusion(nn.Module):
-    """
-    A self-contained scheduler that keeps all diffusion constants as buffers so
-    they are saved / moved with the model.
-    """
     def __init__(
         self,
         timesteps: int = 1000,

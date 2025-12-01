@@ -4,6 +4,7 @@ import yaml
 from trainer.train_vae import train_vae_loop
 from trainer.train_disentangle_mar import train_disentangle_loop_mar
 from trainer.train_disentangle_sd import train_disentangle_loop_sd
+from trainer.train_disentangle_sd_pro import train_disentangle_loop_sd_pro
 from trainer.train_disentangle_regression import train_disentangle_regression_loop
 
 cfg = yaml.safe_load(open("configs/config.yaml"))
@@ -21,6 +22,9 @@ elif stage == "disentangle_regression":
 elif stage == "disentangle_sd":
     print("=== Stage-2: Disentangle + DDPM SD Training ===")
     train_disentangle_loop_sd(cfg["disentangle_sd"])
+elif stage == "disentangle_sd_pro":
+    print("=== Stage-2: Disentangle + DDPM SD PRO Training ===")
+    train_disentangle_loop_sd_pro(cfg["disentangle_sd_pro"])
 else:
     raise ValueError("config['train_stage'] must be 'VAE' or 'Disentangle'")
 

@@ -1,5 +1,5 @@
 # GLOBAL CONFIGURATION
-train_stage: disentangle_sd     # disentangle_regression / disentangle_mar / disentangle_sd / VAE
+train_stage: disentangle_sd   # disentangle_regression / disentangle_mar / disentangle_sd / disentangle_sd_pro / VAE
 img_size: 128
 data_dir: ./data
 batch_size: 32
@@ -72,13 +72,27 @@ disentangle_mar:
     type: "flow_matching"    # ddpm / flow_matching
 
   dataset:
-    pt_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_v2.pt"
-    chars_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/intersection_chars.txt"
+    pt_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_5_stroke.pt"
+    chars_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/stroke_5_chars.txt"
     stats_yaml: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/latent_stats.yaml"
     font_json: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_list.json"
-    train_ratio: 0.9
+    train_ratio_font: 0.9  
+    train_ratio_char: 0.9  
     latent_size: 16          # 16×16×4 → flatten 1024
     augment_prob: 0.0
+    train_test_split: soft-train-test-split  # soft-train-test-split / quad-split
+    soft_holdout_ratio: 0.05
+    soft_holdout_count: 2000
+    soft_holdout_seed: 1234
+    soft_holdout_pair_num: 2000
+  
+  siamese:
+    enable: true
+    content_ckpt: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/content_best_ckpt_vgg_full.pth"
+    style_ckpt: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/style_best_ckpt_vgg_full.pth"
+    device: "cuda"         # 或 "cpu"
+    content_encoder_type: "vgg" # 或"vgg"
+    style_encoder_type: "vgg"
 
   encoder:   # residual MLP 
     enable: true
@@ -105,21 +119,21 @@ disentangle_mar:
       warmup: 10000
     
   flow_matching:
-    ode_solver: "heun"       # "euler" | "heun"
+    ode_solver: "euler"       # "euler" | "heun"
     ode_steps: 50            # 与 sample.steps 对齐用
     t_epsilon: 1.0e-5
     path:
       type: "linear_rf"      # 先只支持线性 RF
-      t_sampler: "uniform" # 和上面的 timestep_sampler 保持一致即可
+      t_sampler: "uniform"   # 和上面的 timestep_sampler 保持一致即可
       ln_mu: -0.5
       ln_sigma: 1.0
       mix_unif_p: 0.05
       clip_q: 0.999
 
   train:
-    epochs: 2000
+    epochs: 500
     batch_size: 256
-    lr: 2.0e-4
+    lr: 1.0e-5
     weight_decay: 0.0
     save_interval: 500
     ckpt_dir: "checkpoints/ddpm_disentangle"
@@ -152,6 +166,36 @@ disentangle_mar:
   sample:
     steps: 50                 # 采样步数
     train_interval_step: 500  # 每 500 step 记录一次训练采样
+  
+  adv:
+    enable: true           # 是否启用 adversarial disentanglement loss
+    lambda: 0.1            # 权重系数 λ_adv
+    hidden_dim: 512        # 分类器中间层大小
+  
+  contrastive:
+    enable: true           # 是否启用对比正则（SCR/CCR）
+    lambda: 0.05           # 总权重 λ_ctr
+    tau: 0.07              # 温度
+    normalize: true        # 先做L2归一化
+    detach: true           # 对 encoder 的 z 在此处停止梯度（更稳）
+    weight:                # 两类对比的相对权重
+      style: 1.0           # SCR
+      content: 1.0         # CCR
+  
+  analyze:
+    enable: true
+    interval: 100          # 每多少个 epoch 做一次 codebook 分析
+    save_dir: "final_codebooks/codebook_MCL_SCCR"  # 保存 c/s_codebook.pt 的路径
+  
+  refiner:
+    enable: false
+    start_epoch: 50      # ⏰ 在第300 epoch之后才启用
+    lr: 1e-5
+    train_steps: 100
+    lambda_l1: 1.0
+    batch_size: 16
+    ckpt_dir: "checkpoints/refiner_base"
+
 
 # DISENTENGLE STABLE DIFFUSION CONDIGURATION 
 disentangle_sd:
@@ -159,17 +203,23 @@ disentangle_sd:
   num_workers: 1
 
   algo:
-    type: flow_matching      # ddpm / flow_matching
+    type: ddpm      # ddpm / flow_matching
   # ---- dataset ----
   dataset:
-    pt_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_v2_temp.pt"
-    chars_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/intersection_chars_temp.txt"
+    pt_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_5_stroke.pt"
+    chars_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/stroke_5_chars.txt"
     stats_yaml: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/latent_stats.yaml"
     font_json: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_list.json"
-    train_ratio: 0.9
+    train_ratio_font: 0.9  
+    train_ratio_char: 0.9  
     latent_size: 16
     augment_prob: 0.0
     latent_channels: 4
+    train_test_split: soft-train-test-split
+    soft_holdout_ratio: 0.05
+    soft_holdout_count: null
+    soft_holdout_seed: 1234
+    soft_holdout_pair_num: 2000
 
   # ---- encoder (content/style) ----
   encoder:
@@ -184,11 +234,11 @@ disentangle_sd:
 
   # ---- denoiser (our LDM-style UNet) ----
   denoiser:
-    base_channels: 256
-    channel_mults: [1, 2, 2]     # -> channel_mult in code
-    num_res_blocks: 2
-    num_heads: 8                 # attention heads
-    ctx_dim: 1024                # token width for cross-attn
+    base_channels: 160
+    channel_mults: [1, 2]     # -> channel_mult in code
+    num_res_blocks: 1
+    num_heads: 2                 # attention heads
+    ctx_dim: 96               # token width for cross-attn
     n_content_tokens: 1
     n_style_tokens: 1
 
@@ -205,6 +255,14 @@ disentangle_sd:
       clip_quantile: 0.999
       warmup: 1000
   
+  siamese:
+    enable: true
+    content_ckpt: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/content_best_ckpt_vgg_full.pth"
+    style_ckpt: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/style_best_ckpt_vgg_full.pth"
+    device: "cuda"         # 或 "cpu"
+    content_encoder_type: "vgg" # 或"vgg"
+    style_encoder_type: "vgg"
+
   flow_matching:
     t_epsilon: 1e-5
     ode_solver: heun     # ["euler", "heun"]
@@ -234,7 +292,7 @@ disentangle_sd:
 
     # classifier-free guidance (drop condition during training)
     cfg:
-      enable: true
+      enable: false
       p_uncond: 0.1
       scale: 3.0           # used for sampling/vis
 
@@ -250,9 +308,7 @@ disentangle_sd:
 
   wandb:
     enable: true   # set true if you want logging
-    project: "font-disentangle"
-    run_name: "sd-unet"
-    log_interval: 10
+    log_interval: 1
 
   vis:
     enable: true           # 关闭可设 false
@@ -275,6 +331,11 @@ disentangle_regression:
     train_ratio: 0.9
     latent_size: 16          # 16×16×4 → flatten 1024
     augment_prob: 0.0
+    train_test_split: quad-split
+    soft_holdout_ratio: 0.05
+    soft_holdout_count: null
+    soft_holdout_seed: 1234
+    soft_holdout_pair_num: 2000
 
   encoder:   # residual MLP 
     enable: true
@@ -300,7 +361,7 @@ disentangle_regression:
       clip_quantile: 0.999   
 
   train:
-    epochs: 2000
+    epochs: 500
     batch_size: 256
     lr: 2.0e-4
     weight_decay: 0.0
@@ -337,3 +398,129 @@ disentangle_regression:
   sample:
     steps: 50                 # 采样步数
     train_interval_step: 500  # 每 500 step 记录一次训练采样
+
+# DISENTANGLE STABLE DIFFUSION PRO CONFIGURATION 
+disentangle_sd_pro:
+  seed: 10086
+  num_workers: 1
+
+  algo:
+    type: ddpm      # ddpm / flow_matching
+
+  dataset:
+    pt_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_5_stroke.pt"
+    chars_path: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/stroke_5_chars.txt"
+    stats_yaml: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/latent_stats.yaml"
+    font_json: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_list.json"
+    train_ratio_font: 0.9
+    train_ratio_char: 0.9
+    latent_size: 16
+    latent_channels: 4
+    augment_prob: 0.0
+    train_test_split: soft-train-test-split
+    soft_holdout_ratio: 0.05
+    soft_holdout_count: null
+    soft_holdout_seed: 1234
+    soft_holdout_pair_num: 2000
+  
+  siamese:
+    enable: true
+    content_ckpt: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/content_best_ckpt_vgg_full.pth"
+    style_ckpt: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/style_best_ckpt_vgg_full.pth"
+    device: "cuda"         # 或 "cpu"
+    content_encoder_type: "vgg" # 或"vgg"
+    style_encoder_type: "vgg"
+
+  encoder:
+    type: "cnn_disentangle"
+    in_channels: 4
+    hidden_channels: 48
+    depth: 2
+    content_channels: 4
+    style_channels: 4
+    patch_size: 2
+
+  denoiser:
+    arch: "simple_patch"      # ["simple_patch", "transformer_patch"]
+    base_channels: 160
+    channel_mults: [1, 2]
+    num_res_blocks: 1         # only used for transformer_patch
+    num_heads: 2
+    ctx_dim: 96
+    patch_size: 4
+    use_learned_null: true
+    timesteps: 1000
+    beta_start: 1.0e-4
+    beta_end: 2.0e-2
+    beta_schedule: "cosine"
+    timestep_sampler:
+      type: "uniform"
+      log_mean: -0.5
+      log_sigma: 1.0
+      mix_uniform_p: 0.05
+      clip_quantile: 0.999
+      warmup: 1000
+  
+  # denoiser:
+  # base_channels: 256
+  # channel_mults: [1, 2, 2]
+  # num_res_blocks: 2
+  # num_heads: 8
+  # ctx_dim: 128
+  # patch_size: 2
+  # use_learned_null: true
+  # timesteps: 1000
+  # beta_start: 1.0e-4
+  # beta_end: 2.0e-2
+  # beta_schedule: "cosine"
+  # timestep_sampler:
+  #   type: "uniform"
+  #   log_mean: -0.5
+  #   log_sigma: 1.0
+  #   mix_uniform_p: 0.05
+  #   clip_quantile: 0.999
+  #   warmup: 1000
+
+  flow_matching:
+    t_epsilon: 1.0e-5
+    ode_solver: heun
+    ode_steps: 50
+    path:
+      t_sampler: uniform
+      ln_mu: -0.5
+      ln_sigma: 1.0
+      mix_unif_p: 0.05
+      clip_q: 0.999
+
+  train:
+    batch_size: 256
+    epochs: 1000
+    lr: 2.0e-4
+    weight_decay: 0.0
+    save_interval: 10
+    ckpt_dir: "checkpoints/sd_unet_pro"
+    scheduler:
+      type: "linear-warmup_cosine-decay"
+      warmup_epochs: 2
+      min_lr: 1.0e-6
+    cfg:
+      enable: true
+      scale: 3.0
+      p_uncond: 0.1
+
+  eval:
+    batch_size: 256
+    interval: 1
+
+  wandb:
+    enable: true
+    log_interval: 1
+
+  vis:
+    enable: true
+    vae_config: "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/config.yaml"
+    vae_ckpt:   "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/vae_best_ckpt.pth"
+
+  sample:
+    steps: 50
+    train_interval_step: 200

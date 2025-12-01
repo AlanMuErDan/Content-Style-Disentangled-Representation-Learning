@@ -4,8 +4,8 @@ from font_dataset import FourWayFontPairLatentPTDataset
 import yaml
 
 # paths
-PT_PATH     = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_v2.pt"
-CHARS_PATH  = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/intersection_chars.txt"
+PT_PATH     = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_5_stroke.pt"
+CHARS_PATH  = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/stroke_5_chars.txt"
 FONTS_JSON  = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_list.json"
 YAML_PATH = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/latent_stats.yaml"
 EXPECTED_CHW = (4, 16, 16)

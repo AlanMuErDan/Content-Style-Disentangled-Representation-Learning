@@ -1,8 +1,10 @@
 # trainer/train_disentangle_sd.py
 
 import os
+import json
 import yaml
 import random
+import numpy as np
 from pathlib import Path
 from typing import Tuple
 
@@ -16,11 +18,18 @@ from torchvision import transforms
 from tqdm import tqdm
 import wandb
 
-from dataset.font_dataset import FourWayFontPairLatentPTDataset, split_fonts, filter_dataset_fonts
+from dataset.font_dataset import (
+    FourWayFontPairLatentPTDataset,
+    split_fonts,
+    split_chars,
+    filter_dataset_fonts,
+    sample_holdout_quads,
+)
 from models.mlp import build_residual_mlp
-from models.unet import CSUNetDenoiser, CSCondCfg
+from models.unet import CSUNetDenoiser, CSCondCfg, LightCSUNetDenoiser
 from models.DDPM import GaussianDiffusion as DDPMNoiseScheduler
 from models.flow_matching import FlowMatching, LinearRFPath, FM_CFG_Wrapper
+from models.encoder import CNNContentStyleEncoder
 
 from utils.logger import init_wandb, log_losses
 from utils.vae_io import load_models, decode as vae_decode
@@ -30,6 +39,19 @@ from utils.lr_scheduler import (
 )
 from utils.ema import LitEma
 from utils.evaluate_basic import compute_psnr, compute_ssim, compute_metrics
+from utils.siamese_scores import (
+    load_model as load_siamese_model,
+    score_pair as siamese_score_pair,
+    DEFAULT_CONTENT_CKPT,
+    DEFAULT_STYLE_CKPT,
+)
+
+
+def seed_worker(worker_id):
+    """Deterministic worker seeding to align DataLoader randomness across runs."""
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 class CFGDenoiser:
@@ -48,61 +70,174 @@ def load_config(cfg_path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def build_dataloaders(cfg: dict) -> Tuple[DataLoader, DataLoader, callable]:
+def build_dataloaders(cfg: dict):
+    """Build dataloaders according to configured split strategy."""
     font_json = cfg["dataset"]["font_json"]
+    chars_path = cfg["dataset"]["chars_path"]
+    split_mode = cfg["dataset"].get("train_test_split", "quad-split").lower()
+    seed = cfg.get("seed", 1234)
+    g = torch.Generator().manual_seed(seed)
 
-    train_fonts, valid_fonts = split_fonts(
-        font_json,
-        train_ratio=cfg["dataset"].get("train_ratio", 0.9),
-        seed=cfg.get("seed", 1234),
-    )
+    # split fonts and chars 
+    if split_mode == "soft-train-test-split":
+        with open(font_json, "r", encoding="utf-8") as f:
+            all_fonts = json.load(f)
+        with open(chars_path, "r", encoding="utf-8") as f:
+            all_chars = [line.strip() for line in f if line.strip()]
+        train_fonts = valid_fonts = set(all_fonts)
+        train_chars = valid_chars = set(all_chars)
+    else:
+        train_fonts, valid_fonts = split_fonts(
+            font_json,
+            train_ratio=cfg["dataset"].get("train_ratio_font", 0.9),
+            seed=cfg.get("seed", 1234),
+        )
+        train_chars, valid_chars = split_chars(
+            chars_path,
+            train_ratio=cfg["dataset"].get("train_ratio_char", 0.9),
+            seed=cfg.get("seed", 1234),
+        )
 
-    print(f"Train fonts: {len(train_fonts)}, Valid fonts: {len(valid_fonts)}")
+    print(f"Fonts split: train={len(train_fonts)}, valid={len(valid_fonts)}")
+    print(f"Chars split: train={len(train_chars)}, valid={len(valid_chars)}")
 
     latent_size = cfg["dataset"].get("latent_size", 16)
     latent_channels = cfg["dataset"].get("latent_channels", 4)
     latent_shape = (latent_channels, latent_size, latent_size)
 
-    ds_train = FourWayFontPairLatentPTDataset(
-        pt_path=cfg["dataset"]["pt_path"],
-        chars_path=cfg["dataset"]["chars_path"],
-        fonts_json=cfg["dataset"]["font_json"],
-        latent_shape=latent_shape,
-        pair_num=10000,
-        stats_yaml=cfg["dataset"].get("stats_yaml", None),
-    )
+    def make_ds(pair_num):
+        return FourWayFontPairLatentPTDataset(
+            pt_path=cfg["dataset"]["pt_path"],
+            chars_path=cfg["dataset"]["chars_path"],
+            fonts_json=cfg["dataset"]["font_json"],
+            latent_shape=latent_shape,
+            pair_num=pair_num,
+            stats_yaml=cfg["dataset"].get("stats_yaml", None),
+        )
 
-    ds_valid = FourWayFontPairLatentPTDataset(
-        pt_path=cfg["dataset"]["pt_path"],
-        chars_path=cfg["dataset"]["chars_path"],
-        fonts_json=cfg["dataset"]["font_json"],
-        latent_shape=latent_shape,
-        pair_num=1000,
-        stats_yaml=cfg["dataset"].get("stats_yaml", None),
-    )
-    filter_dataset_fonts(ds_train, train_fonts)
-    filter_dataset_fonts(ds_valid, valid_fonts)
+    ds_scsf = make_ds(500000)
+    ds_scuf = make_ds(2000) if split_mode != "soft-train-test-split" else None
+    ds_ucsf = make_ds(2000) if split_mode != "soft-train-test-split" else None
+    ds_ucuf = make_ds(2000) if split_mode != "soft-train-test-split" else None
+    ds_holdout = None
 
-    dl_train = DataLoader(
-        ds_train,
+    # 1. SCSF always uses training fonts/chars subset
+    filter_dataset_fonts(ds_scsf, train_fonts)
+    ds_scsf.apply_char_filter(train_chars)
+
+    if split_mode != "soft-train-test-split":
+        # 2. SCUF: seen char + unseen font
+        filter_dataset_fonts(ds_scuf, valid_fonts)
+        ds_scuf.apply_char_filter(train_chars)
+
+        # 3. UCSF: unseen char + seen font
+        filter_dataset_fonts(ds_ucsf, train_fonts)
+        ds_ucsf.apply_char_filter(valid_chars)
+
+        # 4. UCUF: unseen char + unseen font
+        filter_dataset_fonts(ds_ucuf, valid_fonts)
+        ds_ucuf.apply_char_filter(valid_chars)
+
+    if split_mode == "soft-train-test-split":
+        soft_ratio = cfg["dataset"].get("soft_holdout_ratio", 0.05)
+        soft_count = cfg["dataset"].get("soft_holdout_count")
+        soft_seed = cfg["dataset"].get("soft_holdout_seed", cfg.get("seed", 1234))
+        soft_pair_num = cfg["dataset"].get("soft_holdout_pair_num", 2000)
+
+        holdout_set = sample_holdout_quads(
+            ds_scsf,
+            count=soft_count,
+            ratio=soft_ratio,
+            seed=soft_seed,
+        )
+        print(f"[split] soft-train-test-split holdout combos: {len(holdout_set)}")
+        if soft_pair_num and soft_pair_num > 0 and len(holdout_set) > 0:
+            ds_holdout = make_ds(soft_pair_num)
+            filter_dataset_fonts(ds_holdout, train_fonts)
+            ds_holdout.apply_char_filter(train_chars)
+            ds_holdout.set_holdout_quads(holdout_set, mode="exclude")
+
+    if split_mode == "soft-train-test-split":
+        print(
+            f"Dataset summary: SCSF={len(ds_scsf)}"
+            + (f", HOLDOUT={len(ds_holdout)}" if ds_holdout is not None else "")
+        )
+    else:
+        print(
+            f"Dataset summary: "
+            f"SCSF={len(ds_scsf)}, SCUF={len(ds_scuf)}, UCSF={len(ds_ucsf)}, UCUF={len(ds_ucuf)}"
+            + (f", HOLDOUT={len(ds_holdout)}" if ds_holdout is not None else "")
+        )
+
+    num_workers = cfg.get("num_workers", 4)
+    dl_scsf = DataLoader(
+        ds_scsf,
         batch_size=cfg["train"]["batch_size"],
         shuffle=True,
-        num_workers=cfg.get("num_workers", 4),
-        pin_memory=True,
-        drop_last=True,
-        persistent_workers=True,
-    )
-    dl_valid = DataLoader(
-        ds_valid,
-        batch_size=cfg["eval"]["batch_size"],
-        shuffle=False,
-        num_workers=cfg.get("num_workers", 4),
+        num_workers=num_workers,
         pin_memory=True,
         drop_last=False,
         persistent_workers=True,
+        worker_init_fn=seed_worker,
+        generator=g,
     )
-    return dl_train, dl_valid, ds_train.denorm
+    val_loaders = {}
+    if split_mode != "soft-train-test-split":
+        dl_scuf = DataLoader(
+            ds_scuf,
+            batch_size=cfg["eval"]["batch_size"],
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True,
+            drop_last=False,
+            persistent_workers=True,
+            worker_init_fn=seed_worker,
+            generator=g,
+        )
+        dl_ucsf = DataLoader(
+            ds_ucsf,
+            batch_size=cfg["eval"]["batch_size"],
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True,
+            drop_last=False,
+            persistent_workers=True,
+            worker_init_fn=seed_worker,
+            generator=g,
+        )
+        dl_ucuf = DataLoader(
+            ds_ucuf,
+            batch_size=cfg["eval"]["batch_size"],
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True,
+            drop_last=False,
+            persistent_workers=True,
+            worker_init_fn=seed_worker,
+            generator=g,
+        )
 
+        val_loaders = {
+            "SCUF": dl_scuf,
+            "UCSF": dl_ucsf,
+            "UCUF": dl_ucuf,
+        }
+
+    if ds_holdout is not None:
+        dl_holdout = DataLoader(
+            ds_holdout,
+            batch_size=cfg["eval"]["batch_size"],
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True,
+            drop_last=False,
+            persistent_workers=True,
+            worker_init_fn=seed_worker,
+            generator=g,
+        )
+        val_loaders["SCSF_Holdout"] = dl_holdout
+
+    return dl_scsf, val_loaders, ds_scsf.denorm
 
 def train_disentangle_loop_sd(cfg: dict):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -124,7 +259,8 @@ def train_disentangle_loop_sd(cfg: dict):
     else:
         encoder = None
 
-    dl_train, dl_valid, denorm = build_dataloaders(cfg)
+    dl_scsf, val_loaders, denorm = build_dataloaders(cfg)
+
 
     cs_cfg = CSCondCfg(
         content_dim=enc_cfg.get("content_dim", 1024),
@@ -134,16 +270,27 @@ def train_disentangle_loop_sd(cfg: dict):
         n_style_tokens=cfg["denoiser"].get("n_style_tokens", 1),
         use_learned_null=True,
     )
-    denoiser = CSUNetDenoiser(
-        sample_size=cfg["dataset"].get("latent_size", 16),
-        in_channels=cfg["dataset"].get("latent_channels", 4),
-        out_channels=cfg["dataset"].get("latent_channels", 4),
-        base_channels=cfg["denoiser"].get("base_channels", 256),
-        channel_mult=tuple(cfg["denoiser"].get("channel_mults", [1, 2, 2])),
-        num_res_blocks=cfg["denoiser"].get("num_res_blocks", 2),
-        num_heads=cfg["denoiser"].get("num_heads", 8),
-        cs_cfg=cs_cfg,
-    ).to(device)
+    arch = str(cfg.get("denoiser", {}).get("arch", "csunet")).lower()
+    if arch == "light_cs":
+        denoiser = LightCSUNetDenoiser(
+            sample_size=cfg["dataset"].get("latent_size", 16),
+            in_channels=cfg["dataset"].get("latent_channels", 4),
+            out_channels=cfg["dataset"].get("latent_channels", 4),
+            base_channels=cfg["denoiser"].get("base_channels", 256),
+            num_heads=cfg["denoiser"].get("num_heads", 8),
+            cs_cfg=cs_cfg,
+        ).to(device)
+    else:
+        denoiser = CSUNetDenoiser(
+            sample_size=cfg["dataset"].get("latent_size", 16),
+            in_channels=cfg["dataset"].get("latent_channels", 4),
+            out_channels=cfg["dataset"].get("latent_channels", 4),
+            base_channels=cfg["denoiser"].get("base_channels", 256),
+            channel_mult=tuple(cfg["denoiser"].get("channel_mults", [1, 2, 2])),
+            num_res_blocks=cfg["denoiser"].get("num_res_blocks", 2),
+            num_heads=cfg["denoiser"].get("num_heads", 8),
+            cs_cfg=cs_cfg,
+        ).to(device)
 
     params = list(denoiser.parameters()) + (list(encoder.parameters()) if (use_encoder and encoder is not None) else [])
     opt = optim.AdamW(
@@ -153,7 +300,7 @@ def train_disentangle_loop_sd(cfg: dict):
     scheduler_cfg = cfg["train"].get("scheduler", {})
     base_lr = float(cfg["train"]["lr"]); min_lr = float(scheduler_cfg.get("min_lr", 0.0))
     warmup_epochs = int(scheduler_cfg.get("warmup_epochs", 0))
-    step_per_epoch = len(dl_train)
+    step_per_epoch = len(dl_scsf)
     total_steps = step_per_epoch * cfg["train"]["epochs"]
     warmup_steps = warmup_epochs * step_per_epoch
     min_ratio = (min_lr / base_lr) if base_lr > 0 else 0.0
@@ -209,6 +356,26 @@ def train_disentangle_loop_sd(cfg: dict):
     if cfg.get("wandb", {}).get("enable", False):
         init_wandb(cfg)
 
+    siamese_cfg = cfg.get("siamese", {})
+    siamese_models = None
+    if siamese_cfg.get("enable", False):
+        siamese_device = torch.device(siamese_cfg.get("device", str(device)))
+        content_ckpt = siamese_cfg.get("content_ckpt") or DEFAULT_CONTENT_CKPT
+        style_ckpt = siamese_cfg.get("style_ckpt") or DEFAULT_STYLE_CKPT
+        content_encoder_type = siamese_cfg.get("encoder_type", "enhanced")
+        style_encoder_type = siamese_cfg.get("encoder_type", "vgg")
+
+        content_model = load_siamese_model(content_ckpt, "content", siamese_device, content_encoder_type)
+        style_model = load_siamese_model(style_ckpt, "style", siamese_device, style_encoder_type)
+
+        siamese_models = {
+            "content": content_model,
+            "style": style_model,
+            "device": siamese_device,
+            "log_table": bool(siamese_cfg.get("log_table", False)),
+        }
+        print("Loaded Siamese evaluators for content/style scoring.")
+
     cfg_train = cfg.get("train", {}).get("cfg", {})
     cfg_enable = bool(cfg_train.get("enable", False))
     p_uncond = float(cfg_train.get("p_uncond", 0.1))
@@ -231,7 +398,7 @@ def train_disentangle_loop_sd(cfg: dict):
                 noise_sched.path.t_sampler = sampler_cfg.get("type", "uniform")
 
 
-        pbar = tqdm(dl_train, desc=f"Epoch {epoch+1}/{cfg['train']['epochs']}")
+        pbar = tqdm(dl_scsf, desc=f"Epoch {epoch+1}/{cfg['train']['epochs']}")
         for batch in pbar:
             x_fa_ca = batch["F_A+C_A"].to(device)
             x_fa_cb = batch["F_A+C_B"].to(device)
@@ -252,7 +419,8 @@ def train_disentangle_loop_sd(cfg: dict):
                 cond_cB_sA = torch.cat([fb_cb_flat, fa_ca_flat], dim=1)[:, :2048]
 
             B = x_fb_ca.size(0)
-            t = noise_sched.sample_timesteps(B, device=x_fb_ca.device)
+            # t = noise_sched.sample_timesteps(B, device=x_fb_ca.device) # sample t∈[0,T). -- Flow Matching
+            t = noise_sched.sample_timesteps(B)  # sample t∈[0,T) -- DDPM
 
             eps1 = torch.randn_like(x_fb_ca)
             x_t1 = noise_sched.q_sample(x_fb_ca.view(B, -1), t, eps1.view(B, -1)).view_as(x_fb_ca)
@@ -308,12 +476,22 @@ def train_disentangle_loop_sd(cfg: dict):
                     ema_denoiser.store(denoiser.parameters())
                     ema_denoiser.copy_to(denoiser)
 
-            train_batch = next(iter(dl_train))
+            train_batch = next(iter(dl_scsf))
             log_sample_images(
-                step, train_batch,  
-                encoder, denoiser, noise_sched,
-                decoder_vae, vae_cfg, denorm,
-                device, name="train/quad_grid", use_encoder=use_encoder, cfg=cfg, algo_type=algo_type
+                step,
+                train_batch,
+                encoder,
+                denoiser,
+                noise_sched,
+                decoder_vae,
+                vae_cfg,
+                denorm,
+                device,
+                name="train/quad_grid",
+                use_encoder=use_encoder,
+                cfg=cfg,
+                algo_type=algo_type,
+                siamese_models=siamese_models,
             )
 
             if use_ema:
@@ -323,12 +501,43 @@ def train_disentangle_loop_sd(cfg: dict):
                     ema_denoiser.restore(denoiser.parameters())
 
         if (epoch + 1) % cfg["eval"]["interval"] == 0:
-            val_loss, vis_batch = evaluate(dl_valid, encoder, denoiser, noise_sched, device, use_encoder, algo_type)
-            if cfg["wandb"]["enable"]:
-                log_losses(step=step, loss_dict={"valid/loss": val_loss})
+            for split_name, loader in val_loaders.items():
+                if use_ema:
+                    if ema_encoder is not None and encoder is not None:
+                        ema_encoder.store(encoder.parameters())
+                        ema_encoder.copy_to(encoder)
+                    if ema_denoiser is not None:
+                        ema_denoiser.store(denoiser.parameters())
+                        ema_denoiser.copy_to(denoiser)
+
+                val_loss, vis_batch = evaluate(loader, encoder, denoiser, noise_sched, device, use_encoder, algo_type)
+
+                if cfg["wandb"]["enable"]:
+                    log_losses(step=step, loss_dict={f"valid/{split_name}_loss": val_loss})
+
                 if cfg["vis"]["enable"]:
-                    log_sample_images(step, vis_batch, encoder, denoiser, noise_sched,
-                                      decoder_vae, vae_cfg, denorm, device, "val/quad_grid", cfg, use_encoder, algo_type=algo_type)
+                    log_sample_images(
+                        step,
+                        vis_batch,
+                        encoder,
+                        denoiser,
+                        noise_sched,
+                        decoder_vae,
+                        vae_cfg,
+                        denorm,
+                        device,
+                        name=f"val/{split_name}/quad_grid",
+                        use_encoder=use_encoder,
+                        cfg=cfg,
+                        algo_type=algo_type,
+                        siamese_models=siamese_models,
+                    )
+
+                if use_ema:
+                    if ema_encoder is not None and encoder is not None:
+                        ema_encoder.restore(encoder.parameters())
+                    if ema_denoiser is not None:
+                        ema_denoiser.restore(denoiser.parameters())
 
         if (epoch + 1) % cfg["train"]["save_interval"] == 0:
             save_ckpt(cfg, epoch, encoder, denoiser, opt,
@@ -359,7 +568,8 @@ def evaluate(loader, encoder, denoiser, scheduler, device, use_encoder: bool, al
             cond2 = torch.cat([fb_cb.view(fb_cb.size(0), -1), fa_ca.view(fa_ca.size(0), -1)], dim=1)[:, :2048]
 
         B = fa_ca.size(0)
-        t = scheduler.sample_timesteps(B, device=fb_ca.device)
+        t = scheduler.sample_timesteps(B)  # sample t∈[0,T) -- DDPM
+        # t = scheduler.sample_timesteps(B, device=fb_ca.device)  # sample t∈[0,T). -- Flow Matching
 
         eps1 = torch.randn_like(fb_ca); x_t1 = scheduler.q_sample(fb_ca.view(B, -1), t, eps1.view(B, -1)).view_as(fb_ca)
         eps2 = torch.randn_like(fa_cb); x_t2 = scheduler.q_sample(fa_cb.view(B, -1), t, eps2.view(B, -1)).view_as(fa_cb)
@@ -381,13 +591,30 @@ def evaluate(loader, encoder, denoiser, scheduler, device, use_encoder: bool, al
 
 
 @torch.no_grad()
-def log_sample_images(step, batch, encoder, denoiser, scheduler,
-                      decoder, vae_cfg, denorm, device, name, cfg, use_encoder: bool, num_show: int = 4, algo_type: str = "ddpm"):
-    encoder.eval()
+def log_sample_images(
+    step,
+    batch,
+    encoder,
+    denoiser,
+    scheduler,
+    decoder,
+    vae_cfg,
+    denorm,
+    device,
+    name,
+    cfg,
+    use_encoder: bool,
+    num_show: int = 16,
+    num_display: int = 4,
+    algo_type: str = "ddpm",
+    siamese_models: dict = None,
+):
+    if encoder is not None:
+        encoder.eval()
     denoiser.eval()
     to_tensor = transforms.ToTensor()
     B_all = batch["F_A+C_A"].size(0)
-    idx = random.sample(range(B_all), k=min(num_show, B_all))
+    idx = list(range(min(num_show, B_all)))
 
     fa_ca = batch["F_A+C_A"][idx].to(device)
     fb_cb = batch["F_B+C_B"][idx].to(device)
@@ -436,23 +663,65 @@ def log_sample_images(step, batch, encoder, denoiser, scheduler,
     img_gen_fb_ca= decode_batch(lat_fb_ca)
 
     rows = []
-    for i in range(len(idx)):
+    for i in range(num_display):
         rows.append(torch.cat([
             img_gt_fa_cb[i], img_gt_fb_ca[i], img_fa_ca[i], img_fb_cb[i], img_gen_fa_cb[i], img_gen_fb_ca[i]
         ], dim=2))
     grid = make_grid(torch.stack(rows), nrow=1, padding=2)
     wandb.log({name: wandb.Image(grid)}, step=step)
 
+    wandb_enabled = cfg.get("wandb", {}).get("enable", False)
+    if not wandb_enabled:
+        return
+
+    img_fa_ca = torch.stack(img_fa_ca)
+    img_fb_cb = torch.stack(img_fb_cb)
     img_gt_fa_cb = torch.stack(img_gt_fa_cb)
     img_gt_fb_ca = torch.stack(img_gt_fb_ca)
     img_gen_fa_cb = torch.stack(img_gen_fa_cb)
     img_gen_fb_ca = torch.stack(img_gen_fb_ca)
 
-    if cfg.get("wandb", {}).get("enable", False):
-        metrics_fa_cb = compute_metrics(img_gen_fa_cb, img_gt_fa_cb)
-        metrics_fb_ca = compute_metrics(img_gen_fb_ca, img_gt_fb_ca)
-        averaged_metrics = {f"{name}/metric_{k}": (metrics_fa_cb[k] + metrics_fb_ca[k]) / 2 for k in metrics_fa_cb}
-        wandb.log(averaged_metrics, step=step)
+    logs = {}
+    metrics_fa_cb = compute_metrics(img_gen_fa_cb, img_gt_fa_cb)
+    metrics_fb_ca = compute_metrics(img_gen_fb_ca, img_gt_fb_ca)
+    logs.update(
+        {f"{name}/metric_{k}": (metrics_fa_cb[k] + metrics_fb_ca[k]) / 2 for k in metrics_fa_cb}
+    )
+
+    if siamese_models:
+        content_model = siamese_models["content"]
+        style_model = siamese_models["style"]
+        siamese_device = siamese_models.get("device", device)
+
+        def batch_scores(preds, content_refs, style_refs):
+            content_scores = []
+            style_scores = []
+            for pred, c_ref, s_ref in zip(preds, content_refs, style_refs):
+                content_scores.append(siamese_score_pair(content_model, pred, c_ref, siamese_device))
+                style_scores.append(siamese_score_pair(style_model, pred, s_ref, siamese_device))
+            return content_scores, style_scores
+
+        fb_content_scores, fb_style_scores = batch_scores(
+            img_gen_fb_ca, img_fa_ca, img_fb_cb
+        )
+        fa_content_scores, fa_style_scores = batch_scores(
+            img_gen_fa_cb, img_fb_cb, img_fa_ca
+        )
+
+        def avg(values):
+            return float(sum(values) / max(len(values), 1)) if values else 0.0
+
+        logs.update(
+            {
+                f"{name}/fb_ca_content_score": avg(fb_content_scores),
+                f"{name}/fb_ca_style_score": avg(fb_style_scores),
+                f"{name}/fa_cb_content_score": avg(fa_content_scores),
+                f"{name}/fa_cb_style_score": avg(fa_style_scores),
+            }
+        )
+
+    if logs:
+        wandb.log(logs, step=step)
 
 
 def save_ckpt(cfg, epoch, encoder, denoiser, optimizer, ema_encoder=None, ema_denoiser=None, lr_scheduler=None):
