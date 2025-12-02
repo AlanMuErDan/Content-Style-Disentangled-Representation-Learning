@@ -91,6 +91,9 @@ pip install -r requirements.txt
 
 ## 6. Data Preparation
 
+To obtain `.ttf` font files, the [FounderType (方正字库)](https://www.foundertype.com/) library provides a wide selection of high-quality Chinese fonts suitable for training.
+
+
 1) **Fonts & charset**  
 ```
 fonts/
