@@ -1,38 +1,22 @@
 
 # Content–Style Disentangled Representation Learning for Chinese Font Generation
 
-A general, architecture-agnostic representation-learning framework for disentangling Chinese font content and style in latent space. The system supports reconstruction, style transfer, interpolation, and synthesis of unseen font–character combinations.
+We proposes a scalable architecture-agnostic framework that clearly separates glyph structure (content) and stylistic attributes (style) into two independent latent spaces. 
 
 ---
 
 ## 1. Overview
 
+![alt text](imgs/framework.png)
+
 This repository implements a two-stage generative pipeline:
 
-1) **Stage 1 – VAE**: Compress 128×128 grayscale glyphs into compact latents (4×16×16).  
-2) **Stage 2 – Disentanglement**: Learn separate content (Zc) and style (Zs) latent spaces using cross-pairing, MCL adversarial loss, SCCR/CCR contrastive regularization, and either DDPM or Flow Matching denoising.  
-The design is architecture-agnostic and works with MAR (MLP AdaLN), UNet (LDM-style), and Patch/Transformer UNet-Pro.
+1) **Stage 1 – VAE**: Compress 128×128 grayscale glyphs into compact latents (16x16x4).  
+2) **Stage 2 – Disentanglement**: Learn separate content (Zc) and style (Zs) latent spaces using cross-pairing, MCL adversarial loss, SCCR/CCR contrastive regularization, and either DDPM or Flow Matching denoising. The design is architecture-agnostic and works with [MAR](https://github.com/LTH14/mar) (MLP AdaLN), [UNet](https://github.com/CompVis/latent-diffusion) (LDM-style), and Patch/Transformer UNet-Pro.
 
 ---
 
-## 2. Pipeline (High-Level)
-
-    Stage 1: VAE                                  Stage 2: Disentanglement
-
-┌──────────────────────┐   ┌──────────────────────────────────────────┐
-│ 128×128 glyph image  │ → │ VAE → latent z                           │
-└──────────────────────┘   │ Cross-pairing (4-way)                     │
-                           │ Adversarial (MCL)                         │
-                           │ Contrastive (SCCR / CCR)                  │
-                           │ Diffusion / Flow Matching denoising       │
-                           └──────────────────────────────────────────┘
-                                        │
-                                        ▼
-                           Synthesis: combine Zc(A) + Zs(B) → glyph
-
----
-
-## 3. QuickStart
+## 2. QuickStart
 
 ```bash
 # 1) Train VAE (config.yaml with train_stage: VAE)
@@ -41,64 +25,71 @@ python main_train.py
 # 2) Extract latents (pt or lmdb)
 python inference/VAE_inference.py --mode pt
 
-# 3) Train disentanglement model (e.g., MAR + Flow Matching)
-python main_train.py   # set train_stage: disentangle_mar / disentangle_sd / disentangle_sd_pro
-
-# 4) Generate new glyphs (pseudo)
-python - <<'PY'
-# load disentangle model + VAE decoder, build cond (Zc+Zs), run scheduler.p_sample_loop, then decode
-PY
-
-
----
-
-## 4. Core Ideas
-
-- Two-stage model: VAE compression → disentangled generative modeling.  
-- Latent space: VAE maps 128×128 → 4×16×16.  
-- Cross-pairing: enforce Zc/Zs swappability across fonts and characters (F_A+C_A, F_A+C_B, F_B+C_A, F_B+C_B).  
-- Disentanglement losses:  
-  - MCL adversarial classifiers strip unwanted content/style.  
-  - SCCR/CCR contrastive refinement for style/content separation.  
-- Noise models: DDPM or Flow Matching.  
-- Backbones available:  
-  - MAR (MLP AdaLN) – fast, stable, generalizes well (recommended default).  
-  - UNet – highest reconstruction fidelity (slower/heavier).  
-  - UNet-Pro – more capacity for complex styles (patch/transformer).  
-- Architecture-agnostic: identical training strategy across MLP/CNN/Transformer.
-
----
-
-## 5. Repository Structure
-
-```
-├── configs/                 # YAML configs (config*.yaml for VAE, MAR, SD, SD-Pro, regression)
-├── trainer/                 # Training loops and entry points
-├── dataset/                 # LMDB/PT dataset logic, splits, latent stats
-├── models/                  # VAE, MLP AdaLN, UNet/UNet-Pro, diffusion/FM schedulers, Siamese
-├── inference/               # VAE latent extraction, shard merge
-├── utils/                   # Metrics, LR schedule, visualization, logging, siamese scores
-├── font_gen.py              # Render glyphs from .ttf to PNG/LMDB
-├── checkpoints/             # Pretrained weights (VAE, Siamese, MAR/DDPM, SD/SD-Pro)
-└── final_codebooks/         # Content/style codebooks
+# 3) Train disentanglement model (config.yaml with train_stage: disentangle_mar / disentangle_sd / disentangle_sd_pro)
+python main_train.py   
 ```
 
+
+
 ---
 
-## 6. Environment
+## 3. Core Ideas
 
-- Python ≥ 3.9, PyTorch ≥ 1.12 (CUDA recommended)  
-- Dependencies: lmdb, Pillow, fontTools, tqdm, lpips, wandb, pyyaml
+- **Latent abstraction via VAE**  
+  High-resolution glyphs are compressed into a compact latent manifold (16×16×4), enabling efficient training while preserving structural semantics.
 
-Install:
+- **Cross-pairing for disentanglement**  
+  Four-way pairing (F_A+C_A, F_A+C_B, F_B+C_A, F_B+C_B) enforces that content and style must become orthogonal factors that can be recombined arbitrarily.
+
+- **Explicit separation through targeted regularization**  
+  MCL adversarial classifiers remove unwanted content/style leakage, while SCCR/CCR contrastive losses align positive pairs and repel negatives, sharpening Zc/Zs boundaries.
+
+- **Conditional generative modeling in latent space**  
+  A diffusion or flow-matching denoiser reconstructs the clean latent from noise conditioned on (Zc, Zs), enabling controllable synthesis and high-fidelity generation.
+
+- **Architecture-agnostic design**  
+  The entire disentanglement strategy applies uniformly across MLP-based (AdaLN), convolutional (UNet), and patch/transformer hybrids (UNet-Pro), demonstrating the generality of the approach.
+
+
+---
+
+## 4. Repository Structure
+
+```
+Content-Style-Disentangled-Representation-Learning/
+├── configs/            # Ready-to-run YAML presets for every stage algo combo
+├── trainer/            # Training harnesses, hooks, EMA/scheduler utilities
+├── dataset/            # Glyph rendering helpers, LMDB/PT datasets, latent stats
+├── models/             # VAE enc/dec, diffusion/FM backbones, Siamese heads
+├── inference/          # Stage-1 latent dumping, shard merge, sanity checks
+├── utils/              # Metrics, logging, visualization, LR helpers
+├── font_gen.py         # CLI for turning .ttf + charset list into datasets
+├── main_train.py       # Switches between VAE/disentangle experiments via configs
+├── checkpoints/        # Pretrained weights + run outputs
+└── final_codebooks/    # Saved content/style dictionaries for sampling
+```
+
+**Quick orientation**
+- Configs + `main_train.py`/`trainer/` define experiments (`train_stage` toggles VAE vs. disentangle).
+- `dataset/`, `font_gen.py`, and `inference/` cover the end-to-end data flow: render glyphs → package latents → compute stats.
+- `models/` and `utils/` contain the reusable building blocks that implement the disentanglement strategy.
+
+---
+
+## 5. Environment
+
+- Python ≥ 3.9  
+- PyTorch ≥ 1.12 (CUDA optional but recommended)  
+
+To install all dependencies, simply run:
 
 ```bash
-pip install torch torchvision lmdb Pillow fonttools tqdm lpips wandb pyyaml
+pip install -r requirements.txt
 ```
 
 ---
 
-## 7. Data Preparation
+## 6. Data Preparation
 
 1) **Fonts & charset**  
 ```
@@ -117,22 +108,20 @@ python font_gen.py \
   --use_lmdb --lmdb_path font_data.lmdb
 ```
 
-3) **(Optional) latent statistics**  
-```
-python dataset/compute_latent_stats.py --lmdb font_latents_*.lmdb --shape 4 16 16
-```
-
 ---
 
-## 8. Stage 1 — VAE Training
+## 7. Stage 1 — VAE Training & Latent Extraction
 
-- Config: `configs/config.yaml` (`train_stage: VAE`, data paths, latent_channels=4, GAN/EMA/LPIPS, LR schedule).  
-- Train: `python main_train.py`  
-- Outputs: `checkpoints/vae_best_ckpt.pth`, wandb logs (if enabled).
+Train the VAE encoder–decoder to obtain compact latent representations.  
+LMDB storage is recommended for stability and faster random access.
 
----
+- Config file: `configs/config.yaml`
+- Output: `checkpoints/vae_best_ckpt.pth` (plus optional wandb logs)
 
-## 9. Latent Extraction
+```bash
+python main_train.py   # or --mode lmdb
+```
+After training, use the VAE encoder to convert 128×128x1 glyphs into latents:
 
 ```bash
 python inference/VAE_inference.py --mode pt   # or --mode lmdb
@@ -140,12 +129,18 @@ python inference/VAE_inference.py --mode pt   # or --mode lmdb
 
 Outputs: `font_latents_*.pt` or `font_latents_*.lmdb` (used directly in Stage 2). Paths are configurable at the top of the script.
 
+Don't forget to compute latent statistics for diffusion/flow-matching normalization:
+
+```bash
+python dataset/compute_latent_stats.py --lmdb font_latents_*.lmdb --shape 4 16 16
+```
+
 ---
 
-## 10. Stage 2 — Disentanglement Training
+## 8. Stage 2 — Disentanglement Training
 
-- Entrypoints: `main_train.py` (config.yaml) or `main_train1/2/3.py` (config_1/2/3.yaml).  
-- Algorithms:  
+- Entrypoints: `main_train.py` (config.yaml).
+- Architectural Backbones:  
   - `disentangle_mar` – MLP AdaLN + DDPM/FM.  
   - `disentangle_sd` – Light UNet (LDM-style).  
   - `disentangle_sd_pro` – Patch/Transformer UNet.  
@@ -157,91 +152,74 @@ Outputs: `font_latents_*.pt` or `font_latents_*.lmdb` (used directly in Stage 2)
   - `train.cfg` for classifier-free guidance (drop prob & scale)  
   - `vis.enable` to decode samples with VAE  
   - `wandb.enable` for logging  
-- Example:  
 ```bash
 python main_train.py   # set train_stage: disentangle_mar / disentangle_sd / disentangle_sd_pro
 ```
 
 ---
 
-## 11. Sampling & Synthesis
-
-Pseudo-steps to generate a glyph:
-
-1) Obtain Zc (content) and Zs (style) from the encoder or codebook.  
-2) Concatenate to form the conditioning vector.  
-3) Run `scheduler.p_sample_loop` (DDPM or FM) with CFG if enabled.  
-4) Decode 4×16×16 latent with `vae_decode` to 128×128 glyph.
-
----
-
-## 12. Evaluation
+## 9. Evaluation
 
 - **Pixel metrics**: PSNR, SSIM, L1/L2 reconstruction (`utils/evaluate_basic.py`).  
 - **Content/Style Siamese metrics**: `utils/siamese_scores.py`; checkpoints in `checkpoints/content_*`, `checkpoints/style_*`.
+To train your own Siamese backbone for custom evaluation:
 
----
-
-## 13. Results
-
-- FM consistently outperforms DDPM.  
-- UNet achieves best reconstruction but trains slower.  
-- MAR balances efficiency and generalization and is the default choice.  
-- Siamese metrics are more reliable for disentanglement evaluation.
-
-Example qualitative swap (ASCII sketch):
-```
-Content A     Style B      Output (A in B-style)
-███████       ██░░██       ██░░███
-██░░██   +    ██████   →   ███░███
-█░░░██        ██░░██       █░░░███
-```
-
-Example quantitative snapshot (illustrative):
-```
-Model        PSNR↑   SSIM↑   C-Siam↑   S-Siam↑
-UNet + FM    22.7    0.93     0.91      0.87
-MAR + FM     21.3    0.91     0.89      0.88
-DDPM + MAR   19.2    0.88     0.84      0.83
+```bash
+python trainer/train_siamese_metrics.py  
 ```
 
 ---
 
-## 14. Troubleshooting & Pitfalls
+## 10. Results
 
-- LMDB access bottleneck: use `readahead=False` (already set) and cache `lmdb_keys.json`.  
-- Broken font cmap: verify supported char counts from `font_gen.py` logs.  
-- Latent shape mismatch: default 4×16×16; update dataset + VAE + denoiser if changed.  
-- DDPM instability: warm up with uniform timesteps or switch to Flow Matching.  
-- Cross-pairing: keep the four paired views aligned; do not reshuffle independently.  
-- Siamese metrics: backbone must match checkpoint (vgg/enhanced) or scores are unreliable.
+We summarize the key findings as follows:
 
----
+- **Flow Matching (FM)** consistently outperforms **DDPM** across all architectures.  
+- **UNet-FM** achieves the best reconstruction fidelity, though it trains more slowly.  
+- **MAR-FM** offers the best balance between speed, stability, and generalization.  
+- **Siamese-based metrics** provide the most reliable assessment of disentanglement quality.
 
-## 15. Pretrained Models
+### Qualitative examples
 
-- `checkpoints/vae_best_ckpt.pth`  
-- `checkpoints/content_best_ckpt_vgg_full.pth`, `checkpoints/style_best_ckpt_vgg_full.pth`  
-- `checkpoints/ddpm_disentangle/epoch_0499.pth`  
-- `checkpoints/sd_unet/epoch_*.pth` (0–999)  
-- `checkpoints/sd_unet_pro/epoch_*.pth` (0–999)  
-- `final_codebooks/codebook_*`
+![alt text](imgs/qualitative_result.png)
 
 ---
 
-## 16. Citation
+### Architecture & Scheduler Comparison
 
-```
-@misc{content_style_disentangle_2025,
-  title  = {Content–Style Disentangled Representation Learning for Chinese Font Generation},
-  author = {Guodong Zheng and Ruilin Wu and Yuanheng Li},
-  year   = {2025}
-}
-```
+| Model         | L1 ↓     | L2 ↓     | PSNR ↑     | SSIM ↑    | C-Score ↑ | S-Score ↑ |
+|--------------|-----------|-----------|-------------|-----------|------------|------------|
+| **MAR-FM**        | 0.0359    | 0.0295    | 15.5569     | 0.8942    | 0.9794     | 0.9808     |
+| MAR-DDPM      | 0.0710    | 0.0582    | 12.6754     | 0.8012    | 0.8495     | 0.5703     |
+| **UNet-FM**       | **0.0126** | **0.0072** | **21.5819** | **0.9487** | **1.0000** | **1.0000** |
+| UNet-DDPM     | 0.0828    | 0.0734    | 11.6415     | 0.8018    | 0.9669     | 0.5010     |
+| UNet-Pro-FM   | 0.1036    | 0.0937    | 10.4966     | 0.7760    | 0.9419     | 0.7453     |
+| UNet-Pro-DDPM | 0.1315    | 0.1234    |  9.3496     | 0.7652    | 0.9705     | 0.3508     |
 
 ---
 
-## 17. License
+### MCL / SCCR Ablation
 
-MIT License.
-```
+| Model        | L1 ↓     | L2 ↓     | PSNR ↑     | SSIM ↑    | C-Score ↑ | S-Score ↑ | C-Sim ↑  | S-Sim ↑  |
+|--------------|-----------|-----------|-------------|-----------|------------|------------|-----------|-----------|
+| Base         | 0.0359    | 0.0295    | **15.5569** | 0.8942    | 0.9999     | 0.9634     | 0.9820    | 0.9835    |
+| **MCL**          | **0.0349** | 0.0297    | 15.5457     | 0.8968    | **1.0000** | 0.9847     | 0.9899    | 0.9902    |
+| **SCCR**         | 0.0373    | **0.0293** | 15.3011     | 0.8925    | **1.0000** | **0.9993** | 0.9794    | 0.9808    |
+| **MCL+SCCR**     | 0.0359    | **0.0289** | 15.4315     | **0.8972** | **1.0000** | **0.9999** | **0.9901** | **0.9903** |
+
+---
+
+### C/S Codebook Latent Visualizations
+
+The learned codebook latents exhibit a highly structured geometry in which **content** and **style** form largely **orthogonal**, semantically meaningful subspaces:
+
+- **Clustering view**: samples sharing the same content or style naturally group together, reflecting clean $Z_c$ / $Z_s$ separation.  
+- **Stroke-analogy view**: modifying semantic components of a character (adding a dot or horizontal stroke) induces nearly parallel displacement vectors across styles, indicating that $Z_c$ captures stable, style-invariant directions.  
+- **Style-trajectory view**: transferring styles traces almost parallel paths for different characters, revealing that $Z_s$ parameterizes a coherent, content-agnostic stylistic manifold.
+
+![alt text](imgs/visualizarion_1.png)
+
+![alt text](imgs/visualization_2.png)
+
+![alt text](imgs/visualization_3.png)
+
