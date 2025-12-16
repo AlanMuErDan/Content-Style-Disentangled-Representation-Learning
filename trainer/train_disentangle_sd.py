@@ -121,20 +121,20 @@ def build_dataloaders(cfg: dict):
     ds_ucuf = make_ds(2000) if split_mode != "soft-train-test-split" else None
     ds_holdout = None
 
-    # 1. SCSF always uses training fonts/chars subset
+    
     filter_dataset_fonts(ds_scsf, train_fonts)
     ds_scsf.apply_char_filter(train_chars)
 
     if split_mode != "soft-train-test-split":
-        # 2. SCUF: seen char + unseen font
+      
         filter_dataset_fonts(ds_scuf, valid_fonts)
         ds_scuf.apply_char_filter(train_chars)
 
-        # 3. UCSF: unseen char + seen font
+      
         filter_dataset_fonts(ds_ucsf, train_fonts)
         ds_ucsf.apply_char_filter(valid_chars)
 
-        # 4. UCUF: unseen char + unseen font
+        
         filter_dataset_fonts(ds_ucuf, valid_fonts)
         ds_ucuf.apply_char_filter(valid_chars)
 

@@ -43,9 +43,7 @@ from utils.siamese_scores import (
 )
 
 
-# ---------------------------
-# Config
-# ---------------------------
+
 def load_config(cfg_path: str) -> dict:
     if not os.path.isfile(cfg_path):
         raise FileNotFoundError(f"Config file not found: {cfg_path}")
@@ -53,9 +51,7 @@ def load_config(cfg_path: str) -> dict:
         return yaml.safe_load(f)
 
 
-# ---------------------------
-# Data
-# ---------------------------
+
 def build_dataloaders(cfg: dict) -> Tuple[DataLoader, DataLoader, callable]:
     font_json = cfg["dataset"]["font_json"]
 
@@ -115,9 +111,7 @@ def build_dataloaders(cfg: dict) -> Tuple[DataLoader, DataLoader, callable]:
     return dl_train, dl_valid, ds_train.denorm
 
 
-# ---------------------------
-# Models
-# ---------------------------
+
 def build_content_style_encoder(cfg: dict) -> nn.Module:
     """
     A residual MLP mapping 1024 -> 2048. We use first 1024 as content, last 1024 as style.
@@ -164,9 +158,7 @@ class ConcatRegressor(nn.Module):
         return y
 
 
-# ---------------------------
-# Train / Eval
-# ---------------------------
+
 def train_disentangle_regression_loop(cfg: dict):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -587,9 +579,6 @@ def save_ckpt(
     torch.save(ckpt, ckpt_path)
 
 
-# ---------------------------
-# Main
-# ---------------------------
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()

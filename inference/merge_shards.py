@@ -1,8 +1,8 @@
 import os, torch
 from VAE_inference import merge_pt_shards_to_single_pt
 
-shard_dir   = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_5_stroke_shards"
-out_pt_path = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_5_stroke.pt"
+shard_dir   = SHARD_PATH
+out_pt_path = OUT_PT_PATH
 
 local_tmp = os.environ.get("SLURM_TMPDIR") or f"/tmp/{os.environ.get('USER','tmp')}"
 merge_pt_shards_to_single_pt(shard_dir, out_pt_path, dtype="float16",

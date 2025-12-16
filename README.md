@@ -216,13 +216,16 @@ We summarize the key findings as follows:
 
 The learned codebook latents exhibit a highly structured geometry in which **content** and **style** form largely **orthogonal**, semantically meaningful subspaces:
 
-- **Clustering view**: samples sharing the same content or style naturally group together, reflecting clean $Z_c$ / $Z_s$ separation.  
+- **Clustering view**: samples sharing the same or similar content or style naturally group together, reflecting clean $Z_c$ / $Z_s$ separation.  
 - **Stroke-analogy view**: modifying semantic components of a character (adding a dot or horizontal stroke) induces nearly parallel displacement vectors across styles, indicating that $Z_c$ captures stable, style-invariant directions.  
 - **Style-trajectory view**: transferring styles traces almost parallel paths for different characters, revealing that $Z_s$ parameterizes a coherent, content-agnostic stylistic manifold.
 
-![alt text](imgs/visualizarion_1.png)
+![alt text](imgs/visualization_1.png)
 
 ![alt text](imgs/visualization_2.png)
 
 ![alt text](imgs/visualization_3.png)
 
+![alt text](imgs/visualization_4.png)
+
+![alt text](imgs/visualization_5.png)

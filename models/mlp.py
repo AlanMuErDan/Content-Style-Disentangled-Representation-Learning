@@ -226,9 +226,6 @@ class SimpleMLPAdaLN(nn.Module):
         return torch.cat([eps, rest], dim=1)
 
 
-# -------------------------
-# Quick smoke test
-# -------------------------
 if __name__ == "__main__":
     print("--- Residual MLP ---")
     model1 = build_residual_mlp(input_dim=1024, hidden_dim=2048, num_layers=4)

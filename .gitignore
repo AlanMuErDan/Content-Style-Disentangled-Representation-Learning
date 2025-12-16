@@ -47,3 +47,10 @@ font_latents_v2_full.pt
 lmdb_test/
 *.mdb
 logs/
+__pycache__/ 
+dataset/__pycache__/ 
+inference/__pycache__/
+models/__pycache__/
+trainer/__pycache__/
+utils/__pycache__/
+

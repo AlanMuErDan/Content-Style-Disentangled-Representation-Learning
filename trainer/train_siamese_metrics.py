@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+
 """Full dataset training helpers."""
 import argparse
 import copy

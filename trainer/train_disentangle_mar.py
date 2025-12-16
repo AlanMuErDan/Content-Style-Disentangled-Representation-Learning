@@ -321,14 +321,14 @@ def train_disentangle_loop_mar(cfg: dict):
     ).to(device)
     print(f"Denoiser: {denoiser}")
 
-    # === Adversarial disentanglement classifiers ===
+    # Adversarial disentanglement classifiers 
     adv_cfg = cfg.get("adv", {})
     use_adv = bool(adv_cfg.get("enable", False))
     lambda_adv = float(adv_cfg.get("lambda", 0.1))
     if use_adv:
         print(f"[ADV] Enabling adversarial disentanglement loss (λ={lambda_adv})")
 
-        # 计算字体数和字符数
+        # calculate num of fonts and chars
         with open(cfg["dataset"]["font_json"], "r", encoding="utf-8") as f:
             num_fonts = len(json.load(f))
         with open(cfg["dataset"]["chars_path"], "r", encoding="utf-8") as f:
@@ -533,19 +533,19 @@ def train_disentangle_loop_mar(cfg: dict):
             
                         # === Adversarial disentanglement loss ===
             if use_adv and use_encoder and encoder is not None:
-                # 这里我们需要四个视图的 latent（为后续对比正则也准备好）
+                
                 z_fa_ca = encoder(x_fa_ca)   # (B, 2048)
                 z_fa_cb = encoder(x_fa_cb)   # (B, 2048)
                 z_fb_ca = encoder(x_fb_ca)   # (B, 2048)
                 z_fb_cb = encoder(x_fb_cb)   # (B, 2048)
 
-                # content/style 切分
+                # content/style 
                 c_fa_ca, s_fa_ca = z_fa_ca[:, :1024], z_fa_ca[:, 1024:]
                 c_fa_cb, s_fa_cb = z_fa_cb[:, :1024], z_fa_cb[:, 1024:]
                 c_fb_ca, s_fb_ca = z_fb_ca[:, :1024], z_fb_ca[:, 1024:]
                 c_fb_cb, s_fb_cb = z_fb_cb[:, :1024], z_fb_cb[:, 1024:]
 
-                # ------- adversarial 分类器（与之前一致）-------
+                # adversarial 
                 y_font_a = batch["font_id_a"].to(device)
                 y_font_b = batch["font_id_b"].to(device)
                 y_char_a = batch["char_id_a"].to(device)
@@ -560,7 +560,7 @@ def train_disentangle_loop_mar(cfg: dict):
                 adv_loss_c = ce_loss(logit_c_on_c, y_char_a) - entropy_loss(logit_s_on_c)
                 adv_loss = 0.5 * (adv_loss_s + adv_loss_c)
             else:
-                # 即使没开 adv，我们也需要四个 latent 用于 contrastive
+                
                 if use_encoder and encoder is not None:
                     z_fa_ca = encoder(x_fa_ca)
                     z_fa_cb = encoder(x_fa_cb)
@@ -573,7 +573,7 @@ def train_disentangle_loop_mar(cfg: dict):
                     c_fb_cb, s_fb_cb = z_fb_cb[:, :1024], z_fb_cb[:, 1024:]
                 adv_loss = torch.tensor(0.0, device=device)
 
-            # === Contrastive Regularization (SCR + CCR) ===
+            # Contrastive Regularization (SCR + CCR) 
             ctr_cfg = cfg.get("contrastive", {})
             use_ctr = bool(ctr_cfg.get("enable", False)) and (use_encoder and encoder is not None)
             if use_ctr:
@@ -584,16 +584,14 @@ def train_disentangle_loop_mar(cfg: dict):
                 w_content = float(ctr_cfg.get("weight", {}).get("content", 1.0))
                 do_detach = bool(ctr_cfg.get("detach", True))
 
-                # 可选 detach，让对比正则更像纯正则项，避免和主任务/对抗打架
+                
                 if do_detach:
                     c_fa_ca = c_fa_ca.detach(); c_fa_cb = c_fa_cb.detach()
                     c_fb_ca = c_fb_ca.detach(); c_fb_cb = c_fb_cb.detach()
                     s_fa_ca = s_fa_ca.detach(); s_fa_cb = s_fa_cb.detach()
                     s_fb_ca = s_fb_ca.detach(); s_fb_cb = s_fb_cb.detach()
 
-                # ---- SCR：style 同字体为正，跨字体为负 ----
-                # 正样本对：(s_fa_ca, s_fa_cb) 与 (s_fb_ca, s_fb_cb)
-                # 负样本池：另一字体的所有 style（2B 个）
+                # SCR
                 style_loss_fa = info_nce_pairwise(
                     anchor=s_fa_ca, positive=s_fa_cb,
                     negatives=torch.cat([s_fb_ca, s_fb_cb], dim=0),
@@ -606,9 +604,7 @@ def train_disentangle_loop_mar(cfg: dict):
                 )
                 scr_loss = 0.5 * (style_loss_fa + style_loss_fb)
 
-                # ---- CCR：content 同字符为正，跨字符为负 ----
-                # 正样本对：(c_fa_ca, c_fb_ca) 与 (c_fa_cb, c_fb_cb)
-                # 负样本池：另一字符的所有 content（2B 个）
+                # CCR
                 content_loss_ca = info_nce_pairwise(
                     anchor=c_fa_ca, positive=c_fb_ca,
                     negatives=torch.cat([c_fa_cb, c_fb_cb], dim=0),
@@ -627,10 +623,10 @@ def train_disentangle_loop_mar(cfg: dict):
                 ccr_loss = torch.tensor(0.0, device=device)
                 contrastive_loss = torch.tensor(0.0, device=device)
 
-            # --- 融合所有正则 ---
+            
             loss = loss + lambda_adv * adv_loss + (lam_ctr * contrastive_loss if use_ctr else 0.0)
 
-            # 记录日志
+            # log
             if cfg.get("wandb", {}).get("enable", False) and step % cfg["wandb"].get("log_interval", 50) == 0:
                 log_dict = {
                     "train/loss": loss.item(),
@@ -782,7 +778,7 @@ def train_disentangle_loop_mar(cfg: dict):
             encoder.eval()
             print(f"[Analyze] Computing codebook at epoch {epoch+1}...")
 
-            # === 加载整个 latent PT ===
+            # load latent PT
             pt_path = cfg["dataset"]["pt_path"]
             blob = torch.load(pt_path, map_location=device)
             latents = blob["latents"] if isinstance(blob, dict) and "latents" in blob else blob
@@ -790,24 +786,23 @@ def train_disentangle_loop_mar(cfg: dict):
             N, H, W, C = latents.shape
             latents = latents.permute(0, 3, 1, 2).contiguous().view(N, -1)
 
-            # === 跑 encoder ===
+            # encoder
             with torch.no_grad():
                 z_all = []
                 for i in tqdm(range(0, N, 512), desc="Encode PT"):
                     z_batch = latents[i:i+512]
-                    z_batch = z_batch.to(device=device, dtype=next(encoder.parameters()).dtype)  # 👈 自动匹配 encoder 的精度
+                    z_batch = z_batch.to(device=device, dtype=next(encoder.parameters()).dtype)  
                     z = encoder(z_batch)
                     z_all.append(z)
                 z_all = torch.cat(z_all, dim=0)  # (N, 2048)
 
             c_all, s_all = z_all[:, :1024], z_all[:, 1024:]
 
-            # === 保存 codebook ===
             save_dir.mkdir(parents=True, exist_ok=True)
             torch.save(c_all.cpu(), save_dir / f"epoch_{epoch+1:04d}_C_codebook.pt")
             torch.save(s_all.cpu(), save_dir / f"epoch_{epoch+1:04d}_S_codebook.pt")
 
-            # === 计算 intra-class variance ===
+            # intra-class variance 
             with open(cfg["dataset"]["font_json"], "r", encoding="utf-8") as f:
                 fonts = json.load(f)
             with open(cfg["dataset"]["chars_path"], "r", encoding="utf-8") as f:
@@ -938,7 +933,7 @@ def log_sample_images(
         fa_cb = batch["F_A+C_B"][idx].to(device).view(-1, 1024)
         fb_ca = batch["F_B+C_A"][idx].to(device).view(-1, 1024)
 
-        # ====== build condition vectors ======
+        # build condition vectors 
         if use_encoder and encoder is not None:
             z_a = encoder(fa_ca)
             z_b = encoder(fb_cb)
@@ -948,7 +943,7 @@ def log_sample_images(
             cond1 = torch.cat([fa_ca, fb_cb], dim=1)
             cond2 = torch.cat([fb_cb, fa_ca], dim=1)
 
-        # ====== CFG handling ======
+        # CFG handling 
         use_cfg = bool(cfg.get("train", {}).get("cfg", {}).get("enable", False)) if cfg else False
         cfg_scale_local = float(cfg.get("train", {}).get("cfg", {}).get("scale", 3.0)) if cfg else 3.0
 
@@ -959,18 +954,18 @@ def log_sample_images(
         else:
             guided_denoiser = denoiser
 
-        # ====== Generate latent samples ======
+        #  Generate latent samples 
         lat_fb_ca = scheduler.p_sample_loop(guided_denoiser, (len(idx), 1024), cond1, device)
         lat_fa_cb = scheduler.p_sample_loop(guided_denoiser, (len(idx), 1024), cond2, device)
 
-        # ====== Optional Refiner ======
+        #  Optional Refiner 
         ref_cfg = cfg.get("refiner", {}) if cfg else {}
         use_refiner = bool(ref_cfg.get("enable", False))
         start_epoch = int(ref_cfg.get("start_epoch", 0))
-        current_epoch = int(cfg.get("current_epoch", 0))  # 从 train_disentangle_loop_mar 传入
+        current_epoch = int(cfg.get("current_epoch", 0))  
         refiner_applied = False
 
-        # 仅在启用且超过起始epoch后启用Refiner
+       
         if use_refiner and (current_epoch >= start_epoch):
             from models.refiner import SimpleRefinerUNet
             ckpt_dir = Path(ref_cfg.get("ckpt_dir", "checkpoints/refiner"))
@@ -988,7 +983,7 @@ def log_sample_images(
                 refiner.load_state_dict(torch.load(ckpt_path, map_location=device))
                 print(f"[Refiner] Loaded from {ckpt_path}")
 
-            # --- 训练Refiner（仅在train阶段）
+            # refiner
             if "train" in name:
                 refiner.train()
                 print(f"[Refiner] Training {train_steps} steps ...")
@@ -1015,11 +1010,11 @@ def log_sample_images(
             else:
                 refiner.eval()
 
-            # --- 保留Refiner前的latent副本以用于可视化对比 ---
+            
             lat_fa_cb_raw = lat_fa_cb.clone()
             lat_fb_ca_raw = lat_fb_ca.clone()
 
-            # --- 应用Refiner ---
+           
             with torch.no_grad():
                 lat_fa_cb = refiner(lat_fa_cb.view(-1, 4, 16, 16)).view(-1, 1024)
                 lat_fb_ca = refiner(lat_fb_ca.view(-1, 4, 16, 16)).view(-1, 1024)
@@ -1029,7 +1024,7 @@ def log_sample_images(
             refiner = None
             refiner_applied = False
 
-        # ====== Decode Function ======
+        # Decode Function
         def reshape_and_decode(flat_latents):
             latents = flat_latents.view(-1, 4, 16, 16)
             decoded_imgs = []
@@ -1039,7 +1034,7 @@ def log_sample_images(
                 decoded_imgs.append(to_tensor(img))
             return decoded_imgs
         
-        # ====== Decode all sets ======
+        #  Decode all sets 
         img_gt_fa_cb = reshape_and_decode(fa_cb)
         img_gt_fb_ca = reshape_and_decode(fb_ca)
         img_fa_ca = reshape_and_decode(fa_ca)
@@ -1055,7 +1050,7 @@ def log_sample_images(
             img_gen_fa_cb_raw = img_gen_fa_cb
             img_gen_fb_ca_raw = img_gen_fb_ca
             
-        # ====== Grid Visualization (main) ======
+        # Grid Visualization (main)
         imgs = []
         for i in range(min(num_display, len(idx))):
             row = torch.cat([
@@ -1070,7 +1065,7 @@ def log_sample_images(
         grid = make_grid(torch.stack(imgs), nrow=1, padding=2)
         wandb.log({name: wandb.Image(grid)}, step=step)
         
-        # ====== Refiner Before/After Comparison ======
+        #  Refiner Before/After Comparison 
         if refiner_applied:
             imgs_compare = []
             for i in range(min(num_display, len(idx))):
@@ -1083,7 +1078,7 @@ def log_sample_images(
             grid_ref = make_grid(torch.stack(imgs_compare), nrow=1, padding=2)
             wandb.log({f"{name}/refiner_compare": wandb.Image(grid_ref)}, step=step)
             
-        # ====== Metric Evaluation ======
+        # Metric Evaluation 
         wandb_enabled = cfg.get("wandb", {}).get("enable", False) if cfg else False
         if not wandb_enabled:
             return
@@ -1147,7 +1142,7 @@ def save_ckpt(
         "denoiser": denoiser.state_dict(),
         "optimizer": optimizer.state_dict(),
     }
-    # GUARD: 仅在存在 encoder 时保存
+    # GUARD
     if encoder is not None:
         ckpt["encoder"] = encoder.state_dict()
     if ema_encoder is not None:

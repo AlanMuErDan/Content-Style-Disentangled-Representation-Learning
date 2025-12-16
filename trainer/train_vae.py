@@ -88,7 +88,7 @@ def train_vae_loop(config):
     decoder = build_decoder(
         name=config["decoder"],
         latent_dim=None,
-        latent_channels=config.get("latent_channels", 16),  # 保持和 encoder 一致
+        latent_channels=config.get("latent_channels", 16),  
         img_size=config["img_size"]
     ).to(device)
     vq = build_quantizer(config).get("content")
@@ -157,7 +157,7 @@ def train_vae_loop(config):
         config["val_data_root"],
         img_size=config["img_size"],
         keys_subset=val_keys,
-        augment_prob=0.5  # 验证禁用增强
+        augment_prob=0.5 
     )
 
     print(f"Found {len(train_dataset)} images in dataset.")

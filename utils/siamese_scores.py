@@ -18,8 +18,8 @@ from torchvision import transforms
 from collections.abc import Mapping
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_CONTENT_CKPT = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/content_bset_ckpt_vgg.pth"
-DEFAULT_STYLE_CKPT = "/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/checkpoints/style_best_ckpt_vgg.pth"
+DEFAULT_CONTENT_CKPT = DEFAULT_CONTENT_CKPT
+DEFAULT_STYLE_CKPT = DEFAULT_STYLE_CKPT
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "siamese_samples"
 
 # Reuse model definitions

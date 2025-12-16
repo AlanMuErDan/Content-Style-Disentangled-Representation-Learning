@@ -94,17 +94,17 @@ if __name__ == "__main__":
     from torchvision.utils import save_image
 
     parser = argparse.ArgumentParser("Single-key VAE sanity checks: latent->decode vs img->encode->decode")
-    parser.add_argument("--config", default="/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/configs/config.yaml")
+    parser.add_argument("--config")
     parser.add_argument("--ckpt", required=True, help="VAE checkpoint (.pth)")
-    parser.add_argument("--latent_lmdb", default="/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_latents_temp.lmdb")
-    parser.add_argument("--image_lmdb",  default="/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/font_data.lmdb")
-    parser.add_argument("--keys_json",   default="/scratch/yl10337/Content-Style-Disentangled-Representation-Learning/lmdb_keys.json")
+    parser.add_argument("--latent_lmdb")
+    parser.add_argument("--image_lmdb")
+    parser.add_argument("--keys_json")
     parser.add_argument("--pick-source", choices=["latent", "image", "json", "common"], default="latent",
-                        help="从哪里挑 key：latent库 / image库 / json文件 / 二者交集")
+                        )
     parser.add_argument("--key", default=None,
-                        help="显式 key（优先）。若可打印即按 UTF-8；不行可用 --key-hex 传十六进制。")
+                        )
     parser.add_argument("--key-hex", default=None,
-                        help="显式 key 的十六进制字串（例如 464f4f2b…），与 --key 互斥。")
+                        )
     parser.add_argument("--outdir", default="vae_onekey_vis")
     parser.add_argument("--latent-shape", nargs=3, type=int, default=[4,16,16], metavar=("C","H","W"))
     parser.add_argument("--latent-dtype", default="float32", choices=["float16","float32","float64"])
@@ -115,11 +115,11 @@ if __name__ == "__main__":
 
     os.makedirs(args.outdir, exist_ok=True)
 
-    # ---------- load VAE ----------
+
     encoder, decoder, cfg, device = load_models(args.config, args.ckpt, None)
     encoder.eval(); decoder.eval()
 
-    # ---------- helpers ----------
+
     C, H, W = args.latent_shape
     np_dtype = np.dtype(args.latent_dtype)
 
@@ -157,7 +157,7 @@ if __name__ == "__main__":
         except UnicodeDecodeError:
             return f"<bytes:{binascii.hexlify(kb).decode()[:32]}...>"
 
-    # ---------- choose key_bytes ----------
+
     env_lat = lmdb.open(args.latent_lmdb, readonly=True, lock=False, readahead=False)
     env_img = lmdb.open(args.image_lmdb,  readonly=True, lock=False, readahead=False)
 
@@ -168,7 +168,7 @@ if __name__ == "__main__":
         key_bytes = binascii.unhexlify(args.key_hex.strip())
         print(f"[Key] Using HEX key: {args.key_hex}  ({pretty_key(key_bytes)})")
     elif args.key is not None:
-        # 尝试 UTF-8，失败则尝试把它当 hex
+
         try:
             key_bytes = args.key.encode("utf-8")
             print(f"[Key] Using UTF-8 key: {args.key}")
@@ -179,7 +179,7 @@ if __name__ == "__main__":
             except Exception as e:
                 raise ValueError(f"--key neither valid UTF-8 nor HEX: {e}")
     else:
-        # 自动挑选
+
         if args.pick_source == "latent":
             keys_lat = list_keys(env_lat)
             if not keys_lat:
@@ -208,7 +208,7 @@ if __name__ == "__main__":
             key_bytes = random.choice(common)
             print(f"[Key] Picked from COMMON: {pretty_key(key_bytes)}")
 
-    # ---------- optional stats for denorm ----------
+
     mean = std = None
     if args.denorm_latent:
         if not args.stats_yaml:
@@ -219,7 +219,7 @@ if __name__ == "__main__":
         std  = torch.tensor(stats["std"]).view(C, 1, 1)
         print(f"[Stats] mean={stats['mean']}, std={stats['std']}")
 
-    # ---------- A) latent -> decode ----------
+
     with env_lat.begin(buffers=True) as txn:
         raw = txn.get(key_bytes)
         if raw is None:
@@ -234,7 +234,7 @@ if __name__ == "__main__":
         img_latent_decode.save(path_latent)
         print(f"[Saved] {path_latent}")
 
-    # ---------- B) image -> encode -> decode ----------
+
     with env_img.begin(buffers=True) as txn:
         raw = txn.get(key_bytes)
         if raw is None:
@@ -261,7 +261,7 @@ if __name__ == "__main__":
         recon = decoder(mu).squeeze(0).cpu().clamp(0, 1)  # [1,H,W]
 
     orig = transforms.ToTensor()(pil.resize((img_size, img_size)))  # [1,H,W], [0,1]
-    cat = torch.cat([orig, recon], dim=-1)  # 横向拼
+    cat = torch.cat([orig, recon], dim=-1)  
     path_pair  = os.path.join(args.outdir, "B_img_encode_decode_pair.png")
     path_orig  = os.path.join(args.outdir, "B_orig.png")
     path_recon = os.path.join(args.outdir, "B_recon.png")
@@ -272,4 +272,4 @@ if __name__ == "__main__":
     print(f"[Saved] {path_orig}")
     print(f"[Saved] {path_recon}")
 
-    print("\nDone. 若 A 有阴影而 B 正常，多半是 latent 需要反标准化（试试 --denorm-latent --stats-yaml）。")
+  

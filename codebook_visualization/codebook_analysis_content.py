@@ -432,10 +432,8 @@ def main():
 
     df, lookup = build_dataframe(style_list, content_list, coords_2d)
 
-    # Task 1
     run_semantic_shift_analysis(df, lookup, style_list, args.vector_plot_styles, args.output_dir)
 
-    # Task 3
     run_content_consistency_analysis(
         df,
         style_list,
